@@ -2,6 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Methodology
+
+This project follows **Test-Driven Development (TDD)**. When adding or modifying features:
+
+1. **Review requirements and design documents first**
+   - Check `docs/requirements_definition.md` for requirements
+   - Check relevant design docs in `docs/design/` folder
+   - Update documents if the change affects specifications
+
+2. **Write or update tests before implementation**
+   - Add test cases to the appropriate `tests/test_*.py` file
+   - Ensure tests cover both normal and error cases
+
+3. **Implement the code**
+   - Write the minimum code to pass the tests
+   - Follow existing code patterns and style
+
+4. **Run all tests**
+   - Always run `python -m pytest` before committing
+   - All tests must pass
+
 ## Project Overview
 
 PDF Translator is a CLI tool for bidirectional Japanese-English PDF translation using Claude API. It uses a "source PDF duplication + text replacement" approach that preserves the original layout (backgrounds, vector graphics, images) while replacing text.
@@ -68,3 +89,4 @@ Optional settings: `CLAUDE_MODEL`, `MAX_TOKENS`, `TEMPERATURE`, `INPUT_DIR`, `OU
 - Tests use pytest fixtures defined in `tests/conftest.py`
 - Mock API key format: `sk-ant-api03-...`
 - `clean_env_and_logging` fixture auto-cleans environment between tests
+- **Always run tests before committing**: `python -m pytest`
