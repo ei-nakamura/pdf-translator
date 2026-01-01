@@ -70,13 +70,43 @@ class SpanInfo:
     text: str
     bbox: BoundingBox
     font: FontInfo
+    index: int = 0  # ページ内でのインデックス
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"text": self.text, "bbox": self.bbox.to_dict(), "font": self.font.to_dict()}
+        return {"text": self.text, "bbox": self.bbox.to_dict(), "font": self.font.to_dict(), "index": self.index}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SpanInfo":
-        return cls(text=d["text"], bbox=BoundingBox.from_dict(d["bbox"]), font=FontInfo.from_dict(d["font"]))
+        return cls(text=d["text"], bbox=BoundingBox.from_dict(d["bbox"]), font=FontInfo.from_dict(d["font"]), index=d.get("index", 0))
+
+
+@dataclass
+class TranslationGroup:
+    """翻訳グループ: 一塊として翻訳されたspan群"""
+    start_index: int  # 開始spanインデックス
+    end_index: int    # 終了spanインデックス（含む）
+    original_text: str  # 元テキスト（結合）
+    translated_text: str  # 翻訳テキスト
+    spans: List[SpanInfo] = field(default_factory=list)  # 対象span
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "start_index": self.start_index,
+            "end_index": self.end_index,
+            "original_text": self.original_text,
+            "translated_text": self.translated_text,
+            "spans": [s.to_dict() for s in self.spans]
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "TranslationGroup":
+        return cls(
+            start_index=d["start_index"],
+            end_index=d["end_index"],
+            original_text=d["original_text"],
+            translated_text=d["translated_text"],
+            spans=[SpanInfo.from_dict(s) for s in d.get("spans", [])]
+        )
 
 
 @dataclass

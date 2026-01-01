@@ -17,7 +17,7 @@
 ```
 pdf_writer.py
 ├── fitz (PyMuPDF)
-├── modules/layout_manager.py (レイアウト情報)
+├── modules/layout_manager.py (レイアウト情報、SpanInfo、TranslationGroup)
 └── config.py (フォント設定)
 ```
 
@@ -233,6 +233,36 @@ class PDFWriter:
             image_info: 画像情報
         """
         pass
+
+    def replace_with_groups(self, page_num: int, groups: List[TranslationGroup],
+                            target_language: str) -> None:
+        """
+        TranslationGroupを使ってテキストを置換
+
+        スパンベース翻訳で使用。グループ内の全spanをredactで消去し、
+        最初のspanの位置にのみ翻訳テキストを配置する。
+
+        Args:
+            page_num: ページ番号
+            groups: 翻訳グループのリスト
+            target_language: 出力言語
+        """
+        pass
+
+    def _write_translation_group(self, page: fitz.Page, group: TranslationGroup,
+                                  target_language: str) -> None:
+        """
+        翻訳グループを書き込む
+
+        グループ内の最初のspan（start_index）の位置にのみ翻訳テキストを配置。
+        他のspanは既にredactで消去済みなので、テキストを書き込まない。
+
+        Args:
+            page: ページオブジェクト
+            group: 翻訳グループ
+            target_language: 出力言語
+        """
+        pass
 ```
 
 ## 7. 処理詳細
@@ -313,6 +343,26 @@ def _fit_text_to_bbox(self, text: str, font: fitz.Font, bbox: Tuple[float, float
 ```
 
 **重要**: 翻訳後のテキストは元のテキストより長くなることが多いため、フォントサイズの自動調整が必須。
+
+### 7.4 TranslationGroupベース置換フロー
+
+```text
+1. 全spanの領域をredact
+   ├── 各グループのspansを走査
+   └── add_redact_annot(span.bbox, fill=False)
+
+2. redactionを適用
+   └── page.apply_redactions()
+
+3. 各グループの翻訳テキストを配置
+   ├── グループごとにループ
+   │   ├── 最初のspan（start_index）のbboxを取得
+   │   ├── 翻訳テキストをその位置に配置
+   │   └── 他のspanは既に消去済み（テキスト配置しない）
+   └── 次のグループへ
+```
+
+**重要**: 翻訳テキストは最初のspanの位置にのみ配置する。これにより、グループ化されたテキストが正しい位置に表示される。
 
 ## 8. エラーハンドリング
 
@@ -410,18 +460,25 @@ writer.close()
 
 ### 11.2 新方式テスト
 
-- [ ] 正常系：元PDFを開く
-- [ ] 正常系：テキスト領域消去
-- [ ] 正常系：翻訳テキスト配置
-- [ ] 正常系：元PDFのレイアウト保持確認
-- [ ] 正常系：ベクターグラフィック保持確認
+- [x] 正常系：元PDFを開く
+- [x] 正常系：テキスト領域消去
+- [x] 正常系：翻訳テキスト配置
+- [x] 正常系：元PDFのレイアウト保持確認
+- [x] 正常系：ベクターグラフィック保持確認
 - [ ] 異常系：元PDF読み込み失敗
+
+### 11.3 TranslationGroupベーステスト
+
+- [ ] 正常系：replace_with_groupsによるテキスト置換
+- [ ] 正常系：最初のspan位置への翻訳テキスト配置
+- [ ] 正常系：複数グループの処理
 
 ---
 
 **作成日**: 2026-01-01
-**バージョン**: 2.0
+**バージョン**: 3.0
 **更新履歴**:
 
 - v1.0: 初版作成（新規PDF作成方式）
 - v2.0: 元PDF複製＋テキスト置換方式に変更
+- v3.0: TranslationGroupベースの置換機能を追加

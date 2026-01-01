@@ -161,6 +161,22 @@ class PDFReader:
         """
         pass
 
+    def extract_sorted_spans(self, page_num: int) -> List[SpanInfo]:
+        """
+        ページからspan単位でテキストを抽出し、位置順にソート
+
+        ブロック単位ではなく、span単位で抽出することで
+        より精度の高い座標情報を取得できる。
+        ソート順は左上から右下（y座標優先、次にx座標）。
+
+        Args:
+            page_num: ページ番号（0始まり）
+
+        Returns:
+            List[SpanInfo]: 位置順にソートされたSpanInfoリスト
+        """
+        pass
+
     def __enter__(self) -> 'PDFReader':
         """コンテキストマネージャー対応"""
         return self
@@ -221,7 +237,52 @@ def extract_text_blocks(self, page: fitz.Page) -> List[TextBlock]:
     return blocks
 ```
 
-### 6.2 言語検出ロジック
+### 6.2 span単位抽出アルゴリズム
+
+```python
+def extract_sorted_spans(self, page_num: int) -> List[SpanInfo]:
+    """
+    span単位でテキストを抽出し、位置順にソート
+
+    処理手順:
+    1. page.get_text("dict")でページ内容を辞書形式で取得
+    2. blocks -> lines -> spans を走査
+    3. 各spanからSpanInfoオブジェクトを生成
+    4. 位置順にソート（y座標優先、次にx座標）
+    5. インデックスを付与
+    """
+    page = self._document[page_num]
+    page_dict = page.get_text("dict")
+    spans = []
+
+    for block in page_dict["blocks"]:
+        if block["type"] != 0:  # テキストブロック以外はスキップ
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = span["text"].strip()
+                if not text:
+                    continue
+                bbox = BoundingBox.from_tuple(tuple(span["bbox"]))
+                font = FontInfo.from_flags(
+                    name=span["font"],
+                    size=span["size"],
+                    flags=span["flags"],
+                    color=self._int_to_rgb(span["color"])
+                )
+                spans.append(SpanInfo(text=text, bbox=bbox, font=font))
+
+    # 位置順にソート（y座標優先、次にx座標）
+    spans.sort(key=lambda s: (s.bbox.y0, s.bbox.x0))
+
+    # インデックスを付与
+    for i, span in enumerate(spans):
+        span.index = i
+
+    return spans
+```
+
+### 6.3 言語検出ロジック
 
 ```python
 def detect_language(self, text: str) -> str:
@@ -314,19 +375,24 @@ with PDFReader() as reader:
 
 ## 10. テスト項目
 
-- [ ] 正常系：テキストのみのPDF読み込み
-- [ ] 正常系：画像を含むPDF読み込み
-- [ ] 正常系：複数ページPDF読み込み
-- [ ] 正常系：日本語テキストの抽出
-- [ ] 正常系：英語テキストの抽出
-- [ ] 正常系：言語自動検出（日本語）
-- [ ] 正常系：言語自動検出（英語）
-- [ ] 異常系：存在しないファイル
-- [ ] 異常系：暗号化PDF
-- [ ] 異常系：破損PDF
+- [x] 正常系：テキストのみのPDF読み込み
+- [x] 正常系：画像を含むPDF読み込み
+- [x] 正常系：複数ページPDF読み込み
+- [x] 正常系：日本語テキストの抽出
+- [x] 正常系：英語テキストの抽出
+- [x] 正常系：言語自動検出（日本語）
+- [x] 正常系：言語自動検出（英語）
+- [ ] 正常系：span単位抽出（extract_sorted_spans）
+- [x] 異常系：存在しないファイル
+- [x] 異常系：暗号化PDF
+- [x] 異常系：破損PDF
 - [ ] 異常系：空のPDF
 
 ---
 
 **作成日**: 2026-01-01
-**バージョン**: 1.0
+**バージョン**: 2.0
+**更新履歴**:
+
+- v1.0: 初版作成
+- v2.0: span単位抽出機能（extract_sorted_spans）を追加

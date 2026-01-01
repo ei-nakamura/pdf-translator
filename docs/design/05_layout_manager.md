@@ -85,7 +85,72 @@ class FontInfo:
         )
 ```
 
-### 4.3 テキストブロック
+### 4.3 スパン情報（span単位のテキスト）
+
+```python
+@dataclass
+class SpanInfo:
+    """span単位のテキスト情報（座標精度を保持）"""
+    text: str                     # テキスト内容
+    bbox: BoundingBox             # 境界ボックス
+    font: FontInfo                # フォント情報
+    index: int = 0                # ページ内でのインデックス（位置順）
+
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式に変換"""
+        return {
+            "text": self.text,
+            "bbox": self.bbox.to_dict(),
+            "font": self.font.to_dict(),
+            "index": self.index
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'SpanInfo':
+        """辞書形式から生成"""
+        return cls(
+            text=d["text"],
+            bbox=BoundingBox.from_dict(d["bbox"]),
+            font=FontInfo.from_dict(d["font"]),
+            index=d.get("index", 0)
+        )
+```
+
+### 4.4 翻訳グループ
+
+```python
+@dataclass
+class TranslationGroup:
+    """翻訳グループ: 一塊として翻訳されたspan群"""
+    start_index: int              # 開始spanインデックス
+    end_index: int                # 終了spanインデックス（含む）
+    original_text: str            # 元テキスト（結合）
+    translated_text: str          # 翻訳テキスト
+    spans: List[SpanInfo] = field(default_factory=list)  # 対象span
+
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式に変換"""
+        return {
+            "start_index": self.start_index,
+            "end_index": self.end_index,
+            "original_text": self.original_text,
+            "translated_text": self.translated_text,
+            "spans": [s.to_dict() for s in self.spans]
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'TranslationGroup':
+        """辞書形式から生成"""
+        return cls(
+            start_index=d["start_index"],
+            end_index=d["end_index"],
+            original_text=d["original_text"],
+            translated_text=d["translated_text"],
+            spans=[SpanInfo.from_dict(s) for s in d.get("spans", [])]
+        )
+```
+
+### 4.5 テキストブロック
 
 ```python
 @dataclass
@@ -116,7 +181,7 @@ class TextBlock:
         return self.translated_char_count / self.char_count
 ```
 
-### 4.4 画像情報
+### 4.6 画像情報
 
 ```python
 @dataclass
@@ -129,7 +194,7 @@ class ImageInfo:
     xref: int = 0                 # PDF内部参照
 ```
 
-### 4.5 図形情報
+### 4.7 図形情報
 
 ```python
 @dataclass
@@ -144,7 +209,7 @@ class DrawingInfo:
     path_data: Optional[str] = None  # パスデータ
 ```
 
-### 4.6 ページデータ
+### 4.8 ページデータ
 
 ```python
 @dataclass
@@ -169,7 +234,7 @@ class PageData:
         return None
 ```
 
-### 4.7 ドキュメントデータ
+### 4.9 ドキュメントデータ
 
 ```python
 @dataclass
@@ -476,17 +541,23 @@ manager.save_to_json("/app/output/layout.json")
 
 ## 10. テスト項目
 
-- [ ] 正常系：データクラスの生成
-- [ ] 正常系：ブロックID生成（一意性）
-- [ ] 正常系：翻訳テキスト更新
-- [ ] 正常系：フォントサイズ調整計算
-- [ ] 正常系：統計情報取得
-- [ ] 正常系：JSONシリアライズ
-- [ ] 正常系：JSONデシリアライズ
+- [x] 正常系：データクラスの生成
+- [x] 正常系：ブロックID生成（一意性）
+- [x] 正常系：翻訳テキスト更新
+- [x] 正常系：フォントサイズ調整計算
+- [x] 正常系：統計情報取得
+- [x] 正常系：JSONシリアライズ
+- [x] 正常系：JSONデシリアライズ
+- [ ] 正常系：SpanInfo生成とシリアライズ
+- [ ] 正常系：TranslationGroup生成とシリアライズ
 - [ ] 異常系：存在しないブロックID
 - [ ] 異常系：無効なJSONファイル
 
 ---
 
 **作成日**: 2026-01-01
-**バージョン**: 1.0
+**バージョン**: 2.0
+**更新履歴**:
+
+- v1.0: 初版作成
+- v2.0: SpanInfo、TranslationGroupデータクラス追加

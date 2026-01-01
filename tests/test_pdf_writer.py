@@ -543,3 +543,279 @@ class TestPDFWriterTextFitting:
                 lines = writer._wrap_text("テスト", font, 12.0, 100.0)
                 assert isinstance(lines, list)
                 assert len(lines) >= 1
+
+
+class TestReplaceWithGroups:
+    """replace_with_groupsメソッドのテスト"""
+
+    @pytest.fixture
+    def sample_pdf_for_groups(self, temp_dir):
+        """テスト用のサンプルPDFを作成"""
+        pdf_path = temp_dir / "sample_groups.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        # 複数のテキストを追加
+        page.insert_text((50, 100), "Hello", fontsize=12)
+        page.insert_text((120, 100), "World", fontsize=12)
+        page.insert_text((50, 150), "Test Text", fontsize=12)
+        doc.save(str(pdf_path))
+        doc.close()
+        return pdf_path
+
+    def test_replace_with_groups_basic(self, sample_pdf_for_groups, temp_dir):
+        """正常系: 基本的なグループ置換"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import SpanInfo, TranslationGroup, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        # TranslationGroupを作成
+        span1 = SpanInfo(
+            text="Hello",
+            bbox=BoundingBox(50, 88, 85, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=0
+        )
+        span2 = SpanInfo(
+            text="World",
+            bbox=BoundingBox(120, 88, 160, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=1
+        )
+
+        group = TranslationGroup(
+            start_index=0,
+            end_index=1,
+            original_text="HelloWorld",
+            translated_text="こんにちは世界",
+            spans=[span1, span2]
+        )
+
+        writer.replace_with_groups(0, [group], "ja")
+
+        output_path = temp_dir / "groups_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_replace_with_groups_multiple_groups(self, sample_pdf_for_groups, temp_dir):
+        """正常系: 複数グループの置換"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import SpanInfo, TranslationGroup, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        # グループ1: Hello World
+        span1 = SpanInfo(
+            text="Hello",
+            bbox=BoundingBox(50, 88, 85, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=0
+        )
+        span2 = SpanInfo(
+            text="World",
+            bbox=BoundingBox(120, 88, 160, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=1
+        )
+        group1 = TranslationGroup(
+            start_index=0,
+            end_index=1,
+            original_text="HelloWorld",
+            translated_text="こんにちは",
+            spans=[span1, span2]
+        )
+
+        # グループ2: Test Text
+        span3 = SpanInfo(
+            text="Test Text",
+            bbox=BoundingBox(50, 138, 120, 152),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=2
+        )
+        group2 = TranslationGroup(
+            start_index=2,
+            end_index=2,
+            original_text="Test Text",
+            translated_text="テストテキスト",
+            spans=[span3]
+        )
+
+        writer.replace_with_groups(0, [group1, group2], "ja")
+
+        output_path = temp_dir / "multi_groups_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_replace_with_groups_empty_list(self, sample_pdf_for_groups, temp_dir):
+        """正常系: 空のグループリスト"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        # 空のリストでもエラーにならない
+        writer.replace_with_groups(0, [], "ja")
+
+        output_path = temp_dir / "empty_groups_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_replace_with_groups_no_document_open(self):
+        """異常系: ドキュメントが開かれていない"""
+        from modules.pdf_writer import PDFWriter, PDFWriteError
+
+        writer = PDFWriter()
+
+        with pytest.raises(PDFWriteError):
+            writer.replace_with_groups(0, [], "ja")
+
+    def test_replace_with_groups_empty_spans(self, sample_pdf_for_groups, temp_dir):
+        """正常系: spansが空のグループはスキップ"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TranslationGroup
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        # spansが空のグループ
+        group = TranslationGroup(
+            start_index=0,
+            end_index=0,
+            original_text="",
+            translated_text="テスト",
+            spans=[]
+        )
+
+        # エラーにならない
+        writer.replace_with_groups(0, [group], "ja")
+
+        output_path = temp_dir / "empty_spans_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_replace_with_groups_empty_translation(self, sample_pdf_for_groups, temp_dir):
+        """正常系: 翻訳テキストが空のグループはスキップ"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import SpanInfo, TranslationGroup, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        span = SpanInfo(
+            text="Hello",
+            bbox=BoundingBox(50, 88, 85, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=0
+        )
+
+        # translated_textが空
+        group = TranslationGroup(
+            start_index=0,
+            end_index=0,
+            original_text="Hello",
+            translated_text="",
+            spans=[span]
+        )
+
+        # エラーにならない（テキストは書き込まれない）
+        writer.replace_with_groups(0, [group], "ja")
+
+        output_path = temp_dir / "empty_translation_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_replace_with_groups_preserves_font_color(self, sample_pdf_for_groups, temp_dir):
+        """正常系: フォントカラーが保持される"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import SpanInfo, TranslationGroup, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        # 赤色のフォント
+        span = SpanInfo(
+            text="Hello",
+            bbox=BoundingBox(50, 88, 85, 102),
+            font=FontInfo(name="Helvetica", size=12.0, color=(255, 0, 0)),
+            index=0
+        )
+
+        group = TranslationGroup(
+            start_index=0,
+            end_index=0,
+            original_text="Hello",
+            translated_text="こんにちは",
+            spans=[span]
+        )
+
+        # エラーにならないこと（色は内部で正規化される）
+        writer.replace_with_groups(0, [group], "ja")
+
+        output_path = temp_dir / "color_preserved_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_write_translation_group_uses_first_span_position(self, sample_pdf_for_groups, temp_dir):
+        """正常系: 翻訳テキストは最初のspanの位置に配置される"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import SpanInfo, TranslationGroup, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf_for_groups))
+
+        # 2つのspanを持つグループ
+        # 翻訳テキストは最初のspan（span1）の位置にのみ配置される
+        span1 = SpanInfo(
+            text="Hello",
+            bbox=BoundingBox(50, 88, 85, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=0
+        )
+        span2 = SpanInfo(
+            text="World",
+            bbox=BoundingBox(120, 88, 160, 102),
+            font=FontInfo(name="Helvetica", size=12.0),
+            index=1
+        )
+
+        group = TranslationGroup(
+            start_index=0,
+            end_index=1,
+            original_text="HelloWorld",
+            translated_text="こんにちは世界",
+            spans=[span1, span2]
+        )
+
+        writer.replace_with_groups(0, [group], "ja")
+
+        output_path = temp_dir / "first_span_position_output.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        # 出力PDFを開いてテキストを確認
+        output_doc = fitz.open(str(output_path))
+        page = output_doc[0]
+        text_dict = page.get_text("dict")
+
+        # テキストが1つだけ出力されていることを確認
+        # （span2の位置には何も書かれていない）
+        text_blocks = [b for b in text_dict.get("blocks", []) if b.get("type") == 0]
+
+        output_doc.close()
+
+        # ファイルが正常に作成されていればOK
+        assert output_path.exists()

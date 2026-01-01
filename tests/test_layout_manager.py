@@ -451,3 +451,172 @@ class TestLayoutManager:
 
         assert loaded_manager.get_document() is not None
         assert loaded_manager.get_document().file_path == "/test.pdf"
+
+
+class TestSpanInfo:
+    """SpanInfoクラスのテスト"""
+
+    def test_create_span_info(self):
+        """正常系: SpanInfo生成"""
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        span = SpanInfo(
+            text="Hello",
+            bbox=BoundingBox(50.0, 100.0, 150.0, 120.0),
+            font=FontInfo(name="Arial", size=12.0),
+            index=0,
+        )
+
+        assert span.text == "Hello"
+        assert span.index == 0
+        assert span.bbox.x0 == 50.0
+        assert span.font.size == 12.0
+
+    def test_span_info_to_dict(self):
+        """正常系: SpanInfoの辞書変換"""
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        span = SpanInfo(
+            text="World",
+            bbox=BoundingBox(10.0, 20.0, 100.0, 40.0),
+            font=FontInfo(name="NotoSansJP", size=14.0),
+            index=5,
+        )
+
+        result = span.to_dict()
+
+        assert result["text"] == "World"
+        assert result["index"] == 5
+        assert result["bbox"]["x0"] == 10.0
+        assert result["font"]["name"] == "NotoSansJP"
+
+    def test_span_info_from_dict(self):
+        """正常系: 辞書からSpanInfo生成"""
+        from modules.layout_manager import SpanInfo
+
+        data = {
+            "text": "Test",
+            "bbox": {"x0": 0.0, "y0": 0.0, "x1": 50.0, "y1": 20.0},
+            "font": {"name": "Arial", "size": 10.0, "is_bold": False, "is_italic": False, "color": [0, 0, 0]},
+            "index": 3,
+        }
+
+        span = SpanInfo.from_dict(data)
+
+        assert span.text == "Test"
+        assert span.index == 3
+        assert span.bbox.x1 == 50.0
+
+    def test_span_info_default_index(self):
+        """正常系: indexのデフォルト値"""
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        span = SpanInfo(
+            text="Default",
+            bbox=BoundingBox(0, 0, 100, 20),
+            font=FontInfo(name="Arial", size=12.0),
+        )
+
+        assert span.index == 0
+
+
+class TestTranslationGroup:
+    """TranslationGroupクラスのテスト"""
+
+    def test_create_translation_group(self):
+        """正常系: TranslationGroup生成"""
+        from modules.layout_manager import TranslationGroup, SpanInfo, BoundingBox, FontInfo
+
+        spans = [
+            SpanInfo(text="Hello", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+            SpanInfo(text="World", bbox=BoundingBox(55, 0, 100, 20), font=FontInfo(name="Arial", size=12.0), index=1),
+        ]
+
+        group = TranslationGroup(
+            start_index=0,
+            end_index=1,
+            original_text="HelloWorld",
+            translated_text="こんにちは世界",
+            spans=spans,
+        )
+
+        assert group.start_index == 0
+        assert group.end_index == 1
+        assert group.original_text == "HelloWorld"
+        assert group.translated_text == "こんにちは世界"
+        assert len(group.spans) == 2
+
+    def test_translation_group_to_dict(self):
+        """正常系: TranslationGroupの辞書変換"""
+        from modules.layout_manager import TranslationGroup, SpanInfo, BoundingBox, FontInfo
+
+        spans = [
+            SpanInfo(text="Test", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+        ]
+
+        group = TranslationGroup(
+            start_index=0,
+            end_index=0,
+            original_text="Test",
+            translated_text="テスト",
+            spans=spans,
+        )
+
+        result = group.to_dict()
+
+        assert result["start_index"] == 0
+        assert result["end_index"] == 0
+        assert result["original_text"] == "Test"
+        assert result["translated_text"] == "テスト"
+        assert len(result["spans"]) == 1
+
+    def test_translation_group_from_dict(self):
+        """正常系: 辞書からTranslationGroup生成"""
+        from modules.layout_manager import TranslationGroup
+
+        data = {
+            "start_index": 2,
+            "end_index": 4,
+            "original_text": "Hello World",
+            "translated_text": "ハローワールド",
+            "spans": [
+                {
+                    "text": "Hello",
+                    "bbox": {"x0": 0, "y0": 0, "x1": 50, "y1": 20},
+                    "font": {"name": "Arial", "size": 12.0, "is_bold": False, "is_italic": False, "color": [0, 0, 0]},
+                    "index": 2,
+                },
+                {
+                    "text": " ",
+                    "bbox": {"x0": 50, "y0": 0, "x1": 55, "y1": 20},
+                    "font": {"name": "Arial", "size": 12.0, "is_bold": False, "is_italic": False, "color": [0, 0, 0]},
+                    "index": 3,
+                },
+                {
+                    "text": "World",
+                    "bbox": {"x0": 55, "y0": 0, "x1": 100, "y1": 20},
+                    "font": {"name": "Arial", "size": 12.0, "is_bold": False, "is_italic": False, "color": [0, 0, 0]},
+                    "index": 4,
+                },
+            ],
+        }
+
+        group = TranslationGroup.from_dict(data)
+
+        assert group.start_index == 2
+        assert group.end_index == 4
+        assert group.translated_text == "ハローワールド"
+        assert len(group.spans) == 3
+
+    def test_translation_group_empty_spans(self):
+        """正常系: 空のspansリスト"""
+        from modules.layout_manager import TranslationGroup
+
+        group = TranslationGroup(
+            start_index=0,
+            end_index=0,
+            original_text="Test",
+            translated_text="テスト",
+        )
+
+        assert len(group.spans) == 0

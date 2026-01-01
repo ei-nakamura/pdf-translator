@@ -9,7 +9,7 @@ import fitz  # PyMuPDF
 from pathlib import Path
 
 from modules.layout_manager import (
-    BoundingBox, FontInfo, TextBlock, ImageInfo, PageData, DocumentData, SpanInfo
+    BoundingBox, FontInfo, TextBlock, ImageInfo, PageData, DocumentData, SpanInfo, TranslationGroup
 )
 
 
@@ -319,6 +319,62 @@ class PDFReader:
                 pass
 
         return images
+
+    def extract_sorted_spans(self, page_num: int) -> List[SpanInfo]:
+        """
+        ページ内のspanを位置順（左上から右下）にソートして抽出
+
+        Args:
+            page_num: ページ番号
+
+        Returns:
+            位置順にソートされたSpanInfoのリスト
+        """
+        if self._document is None:
+            raise PDFReadError("No document is open")
+
+        page = self._document[page_num]
+        page_dict = page.get_text("dict")
+
+        spans: List[SpanInfo] = []
+
+        for block in page_dict.get("blocks", []):
+            if block.get("type") == 0:  # text block
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        span_text = span.get("text", "")
+                        if not span_text.strip():
+                            continue
+
+                        span_bbox = span.get("bbox", (0, 0, 0, 0))
+                        color_int = span.get("color", 0)
+                        r = (color_int >> 16) & 0xFF
+                        g = (color_int >> 8) & 0xFF
+                        b = color_int & 0xFF
+
+                        spans.append(SpanInfo(
+                            text=span_text,
+                            bbox=BoundingBox(
+                                x0=span_bbox[0], y0=span_bbox[1],
+                                x1=span_bbox[2], y1=span_bbox[3]
+                            ),
+                            font=FontInfo(
+                                name=span.get("font", ""),
+                                size=span.get("size", 12.0),
+                                is_bold=bool(span.get("flags", 0) & 16),
+                                is_italic=bool(span.get("flags", 0) & 2),
+                                color=(r, g, b),
+                            ),
+                        ))
+
+        # Y座標 → X座標 でソート（左上から右下へ）
+        spans.sort(key=lambda s: (s.bbox.y0, s.bbox.x0))
+
+        # インデックスを付与
+        for i, span in enumerate(spans):
+            span.index = i
+
+        return spans
 
     def _merge_overlapping_blocks(self, blocks: List[TextBlock]) -> List[TextBlock]:
         """

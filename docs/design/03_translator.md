@@ -20,7 +20,7 @@ Claude APIを使用してテキストを翻訳するモジュール。
 translator.py
 ├── anthropic (Claude API SDK)
 ├── config.py (API設定)
-└── modules/layout_manager.py (TextBlockデータクラス)
+└── modules/layout_manager.py (TextBlock, SpanInfo, TranslationGroupデータクラス)
 ```
 
 ## 4. 定数定義
@@ -129,6 +129,51 @@ class Translator:
     def _handle_rate_limit(self, retry_count: int) -> None:
         """レート制限対応の待機処理"""
         pass
+
+    def translate_spans(self, spans: List[SpanInfo],
+                        direction: TranslationDirection) -> List[TranslationGroup]:
+        """
+        span配列を翻訳し、グループ情報を返す
+
+        全spanを1回のAPI呼び出しで翻訳し、AIがどのspanを
+        グループ化して翻訳すべきかを判断する。
+
+        Args:
+            spans: 位置順にソートされたSpanInfoのリスト
+            direction: 翻訳方向
+
+        Returns:
+            List[TranslationGroup]: 翻訳グループのリスト
+        """
+        pass
+
+    def _parse_translation_groups(self, response: str,
+                                   spans: List[SpanInfo]) -> List[TranslationGroup]:
+        """
+        APIレスポンスをパースしてTranslationGroupのリストを生成
+
+        Args:
+            response: APIからのJSON文字列
+            spans: 元のSpanInfoリスト
+
+        Returns:
+            List[TranslationGroup]: パースされた翻訳グループ
+        """
+        pass
+
+    def _fallback_groups(self, spans: List[SpanInfo]) -> List[TranslationGroup]:
+        """
+        フォールバック: 各spanを個別グループとして扱う
+
+        JSONパースに失敗した場合に使用
+
+        Args:
+            spans: SpanInfoリスト
+
+        Returns:
+            List[TranslationGroup]: 各spanを個別グループとした結果
+        """
+        pass
 ```
 
 ## 6. プロンプト設計
@@ -162,7 +207,65 @@ Rules:
 """
 ```
 
-### 6.2 ユーザープロンプト
+### 6.2 スパンベース翻訳用システムプロンプト
+
+```python
+SYSTEM_PROMPT_SPANS_EN_TO_JA = """You are a professional translator for PDF documents.
+You will receive a JSON array of text spans extracted from a PDF, sorted by position (top-left to bottom-right).
+
+Your task:
+1. Analyze which spans should be translated together as meaningful groups
+2. Translate each group from English to Japanese
+3. Return the result as a JSON array
+
+Input format:
+[{"index": 0, "text": "Hello"}, {"index": 1, "text": "World"}, ...]
+
+Output format (MUST be valid JSON):
+[
+  {"start": 0, "end": 1, "translation": "翻訳結果"},
+  {"start": 2, "end": 5, "translation": "別の翻訳"},
+  ...
+]
+
+Rules:
+- "start" and "end" are inclusive span indices
+- Group spans that form a logical unit (sentence, phrase, heading)
+- Single words can be their own group
+- Translate naturally, not word-by-word
+- Keep proper nouns and technical terms as appropriate
+- Output ONLY the JSON array, no explanations
+"""
+
+SYSTEM_PROMPT_SPANS_JA_TO_EN = """You are a professional translator for PDF documents.
+You will receive a JSON array of text spans extracted from a PDF, sorted by position (top-left to bottom-right).
+
+Your task:
+1. Analyze which spans should be translated together as meaningful groups
+2. Translate each group from Japanese to English
+3. Return the result as a JSON array
+
+Input format:
+[{"index": 0, "text": "こんにちは"}, {"index": 1, "text": "世界"}, ...]
+
+Output format (MUST be valid JSON):
+[
+  {"start": 0, "end": 1, "translation": "Hello World"},
+  {"start": 2, "end": 5, "translation": "Another translation"},
+  ...
+]
+
+Rules:
+- "start" and "end" are inclusive span indices
+- Group spans that form a logical unit (sentence, phrase, heading)
+- Single words can be their own group
+- Translate naturally, not word-by-word
+- Keep proper nouns and technical terms as appropriate
+- Output ONLY the JSON array, no explanations
+"""
+```
+
+### 6.3 ユーザープロンプト
 
 ```python
 def _build_user_prompt(self, text: str, context: Optional[str] = None) -> str:
@@ -218,6 +321,35 @@ def _build_user_prompt(self, text: str, context: Optional[str] = None) -> str:
 
 5. 翻訳結果リスト返却
 ```
+
+### 7.3 スパンベース翻訳（推奨）
+
+```
+1. SpanInfoリストをJSON形式に変換
+   ├── 各spanのindex, textを抽出
+   └── JSON配列として送信
+
+2. API呼び出し（1回のみ）
+   ├── スパンベース用システムプロンプト使用
+   └── JSON配列を入力として送信
+
+3. レスポンスをパース
+   ├── JSON配列を解析
+   ├── start/end/translationを抽出
+   └── TranslationGroupを生成
+
+4. グループに対応するspanを紐付け
+   ├── 範囲内のspanを収集
+   └── original_textを結合
+
+5. TranslationGroupリスト返却
+```
+
+**メリット**:
+
+- API呼び出し回数が1回に削減（ブロック単位では53回 → 1回）
+- 処理時間が大幅に短縮（150秒 → 40秒程度）
+- AIがコンテキストを考慮してグループ化を判断
 
 ## 8. エラーハンドリング
 
@@ -337,18 +469,24 @@ translated_blocks = translator.translate_blocks(
 
 ## 12. テスト項目
 
-- [ ] 正常系：日本語→英語翻訳
-- [ ] 正常系：英語→日本語翻訳
-- [ ] 正常系：長文テキスト翻訳
-- [ ] 正常系：バッチ翻訳
-- [ ] 正常系：特殊文字を含むテキスト
-- [ ] 異常系：空テキスト
-- [ ] 異常系：無効なAPIキー
-- [ ] 異常系：レート制限（リトライ確認）
-- [ ] 異常系：ネットワークエラー
+- [x] 正常系：日本語→英語翻訳
+- [x] 正常系：英語→日本語翻訳
+- [x] 正常系：長文テキスト翻訳
+- [x] 正常系：バッチ翻訳
+- [x] 正常系：特殊文字を含むテキスト
+- [ ] 正常系：スパンベース翻訳（translate_spans）
+- [ ] 正常系：翻訳グループのパース
+- [x] 異常系：空テキスト
+- [x] 異常系：無効なAPIキー
+- [x] 異常系：レート制限（リトライ確認）
+- [x] 異常系：ネットワークエラー
 - [ ] 異常系：トークン制限超過
 
 ---
 
 **作成日**: 2026-01-01
-**バージョン**: 1.0
+**バージョン**: 2.0
+**更新履歴**:
+
+- v1.0: 初版作成
+- v2.0: スパンベース翻訳機能（translate_spans）を追加

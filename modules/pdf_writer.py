@@ -11,7 +11,7 @@ import os
 import platform
 
 from modules.layout_manager import (
-    BoundingBox, FontInfo, TextBlock, ImageInfo, PageData, SpanInfo
+    BoundingBox, FontInfo, TextBlock, ImageInfo, PageData, SpanInfo, TranslationGroup
 )
 
 
@@ -153,6 +153,86 @@ class PDFWriter:
             # 従来方式
             for block in text_blocks:
                 self._write_text(page, block, target_language)
+
+    def replace_with_groups(
+        self,
+        page_num: int,
+        groups: List[TranslationGroup],
+        target_language: str
+    ) -> None:
+        """
+        TranslationGroupを使ってテキストを置換
+
+        Args:
+            page_num: ページ番号
+            groups: 翻訳グループのリスト
+            target_language: 出力言語
+        """
+        if self._document is None:
+            raise PDFWriteError("No document is open")
+
+        page = self._document[page_num]
+
+        # 全spanの領域をredact
+        for group in groups:
+            for span in group.spans:
+                bbox = span.bbox.to_tuple()
+                self._add_redact_annotation(page, bbox)
+
+        # redactionを適用
+        page.apply_redactions()
+
+        # 各グループの翻訳テキストを配置
+        for group in groups:
+            self._write_translation_group(page, group, target_language)
+
+    def _write_translation_group(
+        self,
+        page: fitz.Page,
+        group: TranslationGroup,
+        target_language: str
+    ) -> None:
+        """
+        翻訳グループを書き込む
+
+        グループ内の最初のspan（start_index）の位置にのみ翻訳テキストを配置。
+        他のspanは既にredactで消去済みなので、テキストを書き込まない。
+
+        Args:
+            page: ページオブジェクト
+            group: 翻訳グループ
+            target_language: 出力言語
+        """
+        if not group.spans or not group.translated_text:
+            return
+
+        # 最初のspanの位置にのみ翻訳テキストを配置
+        first_span = group.spans[0]
+        bbox = first_span.bbox.to_tuple()
+        text = group.translated_text
+
+        # 最初のspanのフォント情報を使用
+        font = first_span.font
+        font_size = self._calculate_font_size(text, bbox, font.size)
+        is_japanese = self._is_japanese(text)
+        color = tuple(c / 255.0 for c in font.color)
+
+        try:
+            if is_japanese and self._japanese_font_path:
+                self._write_text_with_font(page, text, bbox, font_size, color)
+            else:
+                rect = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                font_name = "hebo" if font.is_bold else self._english_font
+                page.insert_textbox(
+                    rect,
+                    text,
+                    fontsize=font_size,
+                    fontname=font_name,
+                    color=color,
+                    align=fitz.TEXT_ALIGN_LEFT,
+                )
+        except Exception as e:
+            raise LayoutError(f"Failed to write translation group: {e}")
 
     def _add_redact_annotation(
         self,

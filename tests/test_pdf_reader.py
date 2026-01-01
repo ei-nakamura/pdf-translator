@@ -304,3 +304,162 @@ class TestPDFReaderExceptions:
         from modules.pdf_reader import PDFReadError, CorruptedPDFError
 
         assert issubclass(CorruptedPDFError, PDFReadError)
+
+
+class TestExtractSortedSpans:
+    """extract_sorted_spansメソッドのテスト"""
+
+    @pytest.fixture
+    def multi_span_pdf_file(self, temp_dir):
+        """複数のspanを持つテスト用PDFを作成"""
+        try:
+            import fitz
+
+            pdf_path = temp_dir / "multi_span.pdf"
+            doc = fitz.open()
+            page = doc.new_page(width=595, height=842)
+
+            # 異なる位置にテキストを挿入（ソートテスト用）
+            # 上から下、左から右の順で配置
+            page.insert_text((100, 100), "First", fontsize=12)  # 左上
+            page.insert_text((300, 100), "Second", fontsize=12)  # 右上
+            page.insert_text((100, 200), "Third", fontsize=12)  # 左下
+            page.insert_text((300, 200), "Fourth", fontsize=12)  # 右下
+
+            doc.save(str(pdf_path))
+            doc.close()
+            return pdf_path
+        except ImportError:
+            pytest.skip("PyMuPDF not installed")
+
+    def test_extract_sorted_spans_returns_list(self, multi_span_pdf_file):
+        """正常系: SpanInfoのリストを返す"""
+        from modules.pdf_reader import PDFReader
+
+        reader = PDFReader()
+        reader.open(str(multi_span_pdf_file))
+        spans = reader.extract_sorted_spans(0)
+
+        assert isinstance(spans, list)
+        assert len(spans) > 0
+
+        reader.close()
+
+    def test_extract_sorted_spans_sorted_by_position(self, multi_span_pdf_file):
+        """正常系: 位置順（y0, x0）でソートされる"""
+        from modules.pdf_reader import PDFReader
+
+        reader = PDFReader()
+        reader.open(str(multi_span_pdf_file))
+        spans = reader.extract_sorted_spans(0)
+
+        # y座標 → x座標の順でソートされていることを確認
+        for i in range(1, len(spans)):
+            prev = spans[i - 1]
+            curr = spans[i]
+            # y0が小さいか、y0が同じならx0が小さい方が先
+            assert (prev.bbox.y0, prev.bbox.x0) <= (curr.bbox.y0, curr.bbox.x0)
+
+        reader.close()
+
+    def test_extract_sorted_spans_has_index(self, multi_span_pdf_file):
+        """正常系: 各spanにインデックスが付与される"""
+        from modules.pdf_reader import PDFReader
+
+        reader = PDFReader()
+        reader.open(str(multi_span_pdf_file))
+        spans = reader.extract_sorted_spans(0)
+
+        for i, span in enumerate(spans):
+            assert span.index == i
+
+        reader.close()
+
+    def test_extract_sorted_spans_has_span_info(self, multi_span_pdf_file):
+        """正常系: SpanInfoに必要な情報が含まれる"""
+        from modules.pdf_reader import PDFReader
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        reader = PDFReader()
+        reader.open(str(multi_span_pdf_file))
+        spans = reader.extract_sorted_spans(0)
+
+        for span in spans:
+            assert isinstance(span, SpanInfo)
+            assert isinstance(span.text, str)
+            assert len(span.text) > 0
+            assert isinstance(span.bbox, BoundingBox)
+            assert isinstance(span.font, FontInfo)
+
+        reader.close()
+
+    def test_extract_sorted_spans_no_document_open(self):
+        """異常系: ドキュメントが開かれていない"""
+        from modules.pdf_reader import PDFReader, PDFReadError
+
+        reader = PDFReader()
+
+        with pytest.raises(PDFReadError):
+            reader.extract_sorted_spans(0)
+
+    def test_extract_sorted_spans_empty_whitespace_filtered(self, temp_dir):
+        """正常系: 空白のみのspanはフィルタリングされる"""
+        try:
+            import fitz
+
+            pdf_path = temp_dir / "whitespace.pdf"
+            doc = fitz.open()
+            page = doc.new_page(width=595, height=842)
+
+            # 通常のテキスト
+            page.insert_text((100, 100), "Visible", fontsize=12)
+            # 空白のみのテキスト（strip()で空になる）は挿入しても
+            # PDF内部では別spanになる可能性があるが、フィルタされる
+
+            doc.save(str(pdf_path))
+            doc.close()
+
+            from modules.pdf_reader import PDFReader
+
+            reader = PDFReader()
+            reader.open(str(pdf_path))
+            spans = reader.extract_sorted_spans(0)
+
+            # 空白のみのspanが含まれていないことを確認
+            for span in spans:
+                assert span.text.strip() != ""
+
+            reader.close()
+        except ImportError:
+            pytest.skip("PyMuPDF not installed")
+
+    def test_extract_sorted_spans_font_info(self, temp_dir):
+        """正常系: フォント情報が正しく抽出される"""
+        try:
+            import fitz
+
+            pdf_path = temp_dir / "font_info.pdf"
+            doc = fitz.open()
+            page = doc.new_page(width=595, height=842)
+
+            # 異なるフォントサイズでテキストを挿入
+            page.insert_text((100, 100), "Small", fontsize=10)
+            page.insert_text((100, 150), "Large", fontsize=20)
+
+            doc.save(str(pdf_path))
+            doc.close()
+
+            from modules.pdf_reader import PDFReader
+
+            reader = PDFReader()
+            reader.open(str(pdf_path))
+            spans = reader.extract_sorted_spans(0)
+
+            # フォントサイズが設定されていることを確認
+            for span in spans:
+                assert span.font.size > 0
+                assert isinstance(span.font.name, str)
+
+            reader.close()
+        except ImportError:
+            pytest.skip("PyMuPDF not installed")
