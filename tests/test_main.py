@@ -241,7 +241,7 @@ class TestOutputPath:
     """出力パス生成のテスト"""
 
     def test_generate_output_path_default(self):
-        """正常系: デフォルト出力パス生成"""
+        """正常系: デフォルト出力パス生成（output_dir未指定時は/app/output）"""
         from main import generate_output_path
         from pathlib import PurePosixPath
 
@@ -276,6 +276,40 @@ class TestOutputPath:
         output_path = generate_output_path(input_path, output_dir="/custom/output")
 
         expected = PurePosixPath("/custom/output/document_translated.pdf")
+        actual = PurePosixPath(output_path.replace("\\", "/"))
+
+        assert actual == expected
+
+    def test_generate_output_path_relative_dir(self):
+        """正常系: 相対パス出力ディレクトリ（ローカル実行用）"""
+        from main import generate_output_path
+        from pathlib import PurePosixPath
+
+        input_path = "document.pdf"
+        output_path = generate_output_path(input_path, output_dir="./output")
+
+        expected = PurePosixPath("output/document_translated.pdf")
+        actual = PurePosixPath(output_path.replace("\\", "/"))
+
+        assert actual == expected
+
+    def test_generate_output_path_from_config(self):
+        """正常系: 設定から出力ディレクトリを取得"""
+        from main import generate_output_path
+        from config import Config, PDFConfig
+        from pathlib import Path, PurePosixPath
+
+        # PDFConfigで出力ディレクトリを設定
+        pdf_config = PDFConfig(output_dir=Path("./custom_output"))
+
+        input_path = "test.pdf"
+        output_path = generate_output_path(
+            input_path,
+            suffix="_ja",
+            output_dir=str(pdf_config.output_dir)
+        )
+
+        expected = PurePosixPath("custom_output/test_ja.pdf")
         actual = PurePosixPath(output_path.replace("\\", "/"))
 
         assert actual == expected

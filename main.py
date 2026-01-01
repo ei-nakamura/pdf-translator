@@ -277,7 +277,7 @@ def main() -> int:
         if args.direction:
             lang = args.direction.split("-")[-1]
             suffix = f"_{lang}"
-        output_path = generate_output_path(input_path, suffix=suffix)
+        output_path = generate_output_path(input_path, suffix=suffix, output_dir=str(config.pdf.output_dir))
 
     app = PDFTranslatorApp(config, logger)
     success = app.run(input_path, output_path, args.direction or "", args.auto_detect)

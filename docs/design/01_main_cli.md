@@ -179,7 +179,33 @@ Completed!
 - Output file: /app/output/document_translated.pdf
 ```
 
-## 10. 使用例
+## 10. 出力パス生成
+
+`generate_output_path`関数は設定から出力ディレクトリを取得します：
+
+```python
+def generate_output_path(
+    input_path: str,
+    suffix: str = "_translated",
+    output_dir: Optional[str] = None
+) -> str:
+    """
+    入力パスから出力パスを生成
+
+    Args:
+        input_path: 入力ファイルパス
+        suffix: ファイル名に追加するサフィックス
+        output_dir: 出力ディレクトリ（設定から取得）
+
+    Returns:
+        生成された出力パス
+    """
+```
+
+**重要**: `output_dir`パラメータには`config.pdf.output_dir`の値を渡します。
+これにより、環境変数`OUTPUT_DIR`で指定されたディレクトリに出力されます。
+
+## 11. 使用例
 
 ```bash
 # 基本的な使用
@@ -195,11 +221,12 @@ python main.py /app/input/document.pdf --auto-detect
 python main.py /app/input/document.pdf -d ja-to-en -v -l /app/output/translate.log
 ```
 
-## 11. テスト項目
+## 12. テスト項目
 
 - [ ] 正常系：基本的な翻訳処理
 - [ ] 正常系：出力ファイル名指定
 - [ ] 正常系：言語自動検出
+- [ ] 正常系：設定から出力ディレクトリを取得
 - [ ] 異常系：入力ファイル不存在
 - [ ] 異常系：無効な翻訳方向指定
 - [ ] 異常系：APIキー未設定
