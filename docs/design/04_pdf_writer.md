@@ -258,55 +258,61 @@ class PDFWriter:
 ### 7.2 テキスト領域消去の詳細
 
 ```python
-def _clear_text_area(self, page: fitz.Page, bbox: Tuple[float, float, float, float],
-                     bg_color: Tuple[float, float, float] = (1, 1, 1)) -> None:
+def _add_redact_annotation(self, page: fitz.Page, bbox: Tuple[float, float, float, float]) -> None:
     """
-    テキスト領域を背景色で塗りつぶして消去
+    テキスト領域をredact注釈でマーク
 
-    方法1: draw_rect（シンプルだが重ね描き）
-    方法2: redact（テキストを完全削除、より確実）
+    重要: fill=False を指定して背景を保持する。
+    fill=True または fill=(1,1,1) を使うと、背景が白で塗りつぶされる。
     """
     rect = fitz.Rect(bbox)
-
-    # 方法1: 白色矩形で覆う
-    page.draw_rect(rect, color=bg_color, fill=bg_color)
-
-    # 方法2: redact機能を使用（より確実）
-    # page.add_redact_annot(rect, fill=bg_color)
-    # page.apply_redactions()
+    # fill=False で背景を保持しつつテキストのみ削除
+    page.add_redact_annot(rect, fill=False)
 ```
+
+**注意**: `fill=False` を使用することで、背景色（緑など）を保持しながらテキストのみを削除できる。
 
 ### 7.3 フォントサイズ自動調整
 
 ```python
-def _calculate_font_size(self, text: str, bbox: Tuple[float, float, float, float],
-                         original_size: float) -> float:
+def _fit_text_to_bbox(self, text: str, font: fitz.Font, bbox: Tuple[float, float, float, float],
+                       max_font_size: float) -> Tuple[float, List[str]]:
     """
-    テキストが領域に収まるようにフォントサイズを調整
+    テキストがbbox領域に収まるようにフォントサイズと折り返しを計算
 
     アルゴリズム:
-    1. 元のフォントサイズでテキスト幅を概算
-    2. bbox幅と比較
-    3. はみ出す場合はサイズを縮小
-    4. 最小サイズ以下にはしない
+    1. 最大フォントサイズから開始
+    2. テキストを領域幅で折り返し
+    3. 折り返された行が領域高さに収まるか確認
+    4. 収まらない場合はフォントサイズを縮小して再試行
+    5. 最小サイズ(6pt)まで縮小しても収まらない場合は、そのまま出力
+
+    Args:
+        text: 出力テキスト
+        font: 使用フォント
+        bbox: 配置領域 (x0, y0, x1, y1)
+        max_font_size: 最大フォントサイズ
+
+    Returns:
+        Tuple[float, List[str]]: (調整後フォントサイズ, 折り返し済み行リスト)
     """
     x0, y0, x1, y1 = bbox
-    available_width = x1 - x0
+    width = x1 - x0
+    height = y1 - y0
 
-    # 平均文字幅を使用して概算（フォントサイズの約0.5倍）
-    avg_char_width = original_size * 0.5
-    estimated_width = len(text) * avg_char_width
+    for font_size in range(int(max_font_size), int(MIN_FONT_SIZE) - 1, -1):
+        lines = wrap_text(text, font, font_size, width)
+        line_height = font_size * 1.2
+        total_height = len(lines) * line_height
 
-    if estimated_width <= available_width:
-        return original_size
+        if total_height <= height:
+            return font_size, lines
 
-    # 縮小率を計算
-    scale = available_width / estimated_width
-    adjusted_size = original_size * scale
-
-    # 最小サイズ制限
-    return max(adjusted_size, MIN_FONT_SIZE)
+    # 最小サイズでも収まらない場合
+    return MIN_FONT_SIZE, wrap_text(text, font, MIN_FONT_SIZE, width)
 ```
+
+**重要**: 翻訳後のテキストは元のテキストより長くなることが多いため、フォントサイズの自動調整が必須。
 
 ## 8. エラーハンドリング
 

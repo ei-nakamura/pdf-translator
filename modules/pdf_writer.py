@@ -141,8 +141,7 @@ class PDFWriter:
     def _add_redact_annotation(
         self,
         page: fitz.Page,
-        bbox: Tuple[float, float, float, float],
-        bg_color: Tuple[float, float, float] = (1, 1, 1)
+        bbox: Tuple[float, float, float, float]
     ) -> None:
         """
         テキスト領域にredact注釈を追加
@@ -150,10 +149,13 @@ class PDFWriter:
         Args:
             page: ページオブジェクト
             bbox: 消去する領域 (x0, y0, x1, y1)
-            bg_color: 背景色（デフォルト: 白）
+
+        Note:
+            fill=False を使用して背景を保持する。
+            fill=True や fill=(1,1,1) を使うと背景が白で塗りつぶされる。
         """
         rect = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
-        page.add_redact_annot(rect, fill=bg_color)
+        page.add_redact_annot(rect, fill=False)
 
     def _clear_text_area(
         self,
@@ -234,31 +236,65 @@ class PDFWriter:
             page: ページオブジェクト
             text: テキスト
             bbox: 配置領域
-            font_size: フォントサイズ
+            font_size: フォントサイズ（最大サイズとして使用）
             color: 文字色 (r, g, b) 0-1
         """
         if not self._japanese_font_path:
             raise FontError("Japanese font not found")
 
-        # TextWriterを使用してテキストを配置
-        tw = fitz.TextWriter(page.rect)
         font = fitz.Font(fontfile=self._japanese_font_path)
 
         x0, y0, x1, y1 = bbox
         width = x1 - x0
         height = y1 - y0
 
-        # 複数行に対応
-        lines = self._wrap_text(text, font, font_size, width)
-        current_y = y0 + font_size  # 最初の行のベースライン
+        # テキストがbboxに収まるようにフォントサイズを調整
+        adjusted_size, lines = self._fit_text_to_bbox(text, font, bbox, font_size)
+
+        # TextWriterを使用してテキストを配置
+        tw = fitz.TextWriter(page.rect)
+        current_y = y0 + adjusted_size  # 最初の行のベースライン
 
         for line in lines:
-            if current_y > y1:
-                break  # 領域外に出たら終了
-            tw.append((x0, current_y), line, font=font, fontsize=font_size)
-            current_y += font_size * 1.2  # 行間
+            tw.append((x0, current_y), line, font=font, fontsize=adjusted_size)
+            current_y += adjusted_size * 1.2  # 行間
 
         tw.write_text(page, color=color)
+
+    def _fit_text_to_bbox(
+        self,
+        text: str,
+        font: fitz.Font,
+        bbox: Tuple[float, float, float, float],
+        max_font_size: float
+    ) -> Tuple[float, List[str]]:
+        """
+        テキストがbbox領域に収まるようにフォントサイズと折り返しを計算
+
+        Args:
+            text: 出力テキスト
+            font: 使用フォント
+            bbox: 配置領域 (x0, y0, x1, y1)
+            max_font_size: 最大フォントサイズ
+
+        Returns:
+            Tuple[float, List[str]]: (調整後フォントサイズ, 折り返し済み行リスト)
+        """
+        x0, y0, x1, y1 = bbox
+        width = x1 - x0
+        height = y1 - y0
+
+        # 最大サイズから最小サイズまで試す
+        for font_size in range(int(max_font_size), int(MIN_FONT_SIZE) - 1, -1):
+            lines = self._wrap_text(text, font, float(font_size), width)
+            line_height = font_size * 1.2
+            total_height = len(lines) * line_height
+
+            if total_height <= height:
+                return float(font_size), lines
+
+        # 最小サイズでも収まらない場合
+        return MIN_FONT_SIZE, self._wrap_text(text, font, MIN_FONT_SIZE, width)
 
     def _wrap_text(
         self,

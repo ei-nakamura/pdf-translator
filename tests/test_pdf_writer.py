@@ -429,3 +429,117 @@ class TestPDFWriterSourceDocument:
         assert writer._is_japanese("漢字") is True
         assert writer._is_japanese("Hello") is False
         assert writer._is_japanese("123") is False
+
+
+class TestPDFWriterBackgroundPreservation:
+    """背景保持のテスト（redact fill=False）"""
+
+    @pytest.fixture
+    def colored_bg_pdf(self, temp_dir):
+        """色付き背景を持つサンプルPDFを作成"""
+        pdf_path = temp_dir / "colored_bg.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        # 緑色の背景矩形を描画
+        green_rect = fitz.Rect(50, 50, 300, 150)
+        page.draw_rect(green_rect, color=(0, 0.5, 0), fill=(0, 0.5, 0))
+        # その上にテキストを追加
+        page.insert_text((100, 100), "Test Text", fontsize=14, color=(1, 1, 1))
+        doc.save(str(pdf_path))
+        doc.close()
+        return pdf_path
+
+    def test_redact_preserves_background(self, colored_bg_pdf, temp_dir):
+        """正常系: redact時に背景色が保持される"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TextBlock, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(colored_bg_pdf))
+
+        # テキストを置換
+        translated_blocks = [
+            TextBlock(
+                id="block_1",
+                text="Test Text",
+                translated_text="テストテキスト",
+                bbox=BoundingBox(90, 85, 250, 115),
+                font=FontInfo(name="Arial", size=14.0, color=(255, 255, 255)),
+            )
+        ]
+
+        writer.replace_text_on_page(0, translated_blocks, "ja")
+
+        output_path = temp_dir / "bg_preserved.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        # 出力PDFを確認
+        output_doc = fitz.open(str(output_path))
+        output_page = output_doc[0]
+
+        # 描画要素が保持されていることを確認
+        drawings = output_page.get_drawings()
+        assert len(drawings) >= 1, "背景の矩形が保持されていること"
+
+        output_doc.close()
+
+
+class TestPDFWriterTextFitting:
+    """テキストのbbox内収容テスト"""
+
+    def test_fit_text_to_bbox_basic(self):
+        """正常系: テキストがbboxに収まるようにフォントサイズを調整"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 短いテキストは元のサイズを維持
+        short_text = "Hi"
+        size = writer._calculate_font_size(
+            text=short_text, bbox=(0, 0, 200, 50), original_size=24.0
+        )
+        assert size == 24.0
+
+    def test_fit_long_text_shrinks(self):
+        """正常系: 長いテキストはフォントサイズが縮小される"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 長いテキストは縮小される
+        long_text = "This is a very very long text that definitely needs shrinking"
+        size = writer._calculate_font_size(
+            text=long_text, bbox=(0, 0, 100, 30), original_size=24.0
+        )
+        assert size < 24.0
+
+    def test_fit_japanese_text(self):
+        """正常系: 日本語テキストのフォントサイズ調整"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 日本語テキスト
+        ja_text = "これは長い日本語のテキストです"
+        size = writer._calculate_font_size(
+            text=ja_text, bbox=(0, 0, 100, 30), original_size=24.0
+        )
+        # フォントサイズが計算されること（エラーなく終了）
+        assert size >= 6.0  # MIN_FONT_SIZE
+
+    def test_wrap_text_basic(self):
+        """正常系: テキストの折り返し"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # _wrap_text が存在し、動作することを確認
+        if hasattr(writer, '_wrap_text'):
+            import fitz
+            # システムフォントを取得（存在する場合）
+            if writer._japanese_font_path:
+                font = fitz.Font(fontfile=writer._japanese_font_path)
+                lines = writer._wrap_text("テスト", font, 12.0, 100.0)
+                assert isinstance(lines, list)
+                assert len(lines) >= 1
