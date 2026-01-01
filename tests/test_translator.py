@@ -354,3 +354,150 @@ class TestTranslatorShortText:
             # 検証機能が実装されていれば、エラーメッセージは除外されるべき
             # 現時点では実装されていないため、このテストは将来の実装のために存在
             assert result is not None
+
+
+class TestTranslatorTranslateSpans:
+    """translate_spansメソッドのテスト"""
+
+    def test_translate_spans_empty_list(self, mock_api_key):
+        """正常系: 空のspanリスト"""
+        from modules.translator import Translator, TranslationDirection
+
+        translator = Translator(api_key=mock_api_key)
+        result = translator.translate_spans([], TranslationDirection.EN_TO_JA)
+
+        assert result == []
+
+    def test_translate_spans_returns_groups(self, mock_api_key):
+        """正常系: TranslationGroupのリストを返す"""
+        from modules.translator import Translator, TranslationDirection
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo, TranslationGroup
+
+        translator = Translator(api_key=mock_api_key)
+        spans = [
+            SpanInfo(text="Hello", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+            SpanInfo(text="World", bbox=BoundingBox(55, 0, 100, 20), font=FontInfo(name="Arial", size=12.0), index=1),
+        ]
+
+        with patch.object(translator, "_call_api_with_system") as mock_call:
+            mock_call.return_value = '[{"start": 0, "end": 1, "translation": "こんにちは世界"}]'
+            result = translator.translate_spans(spans, TranslationDirection.EN_TO_JA)
+
+            assert len(result) == 1
+            assert isinstance(result[0], TranslationGroup)
+            assert result[0].start_index == 0
+            assert result[0].end_index == 1
+            assert result[0].translated_text == "こんにちは世界"
+
+    def test_translate_spans_multiple_groups(self, mock_api_key):
+        """正常系: 複数グループの翻訳"""
+        from modules.translator import Translator, TranslationDirection
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        translator = Translator(api_key=mock_api_key)
+        spans = [
+            SpanInfo(text="Hello", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+            SpanInfo(text="World", bbox=BoundingBox(55, 0, 100, 20), font=FontInfo(name="Arial", size=12.0), index=1),
+            SpanInfo(text="Test", bbox=BoundingBox(0, 30, 50, 50), font=FontInfo(name="Arial", size=12.0), index=2),
+        ]
+
+        with patch.object(translator, "_call_api_with_system") as mock_call:
+            mock_call.return_value = '''[
+                {"start": 0, "end": 1, "translation": "こんにちは世界"},
+                {"start": 2, "end": 2, "translation": "テスト"}
+            ]'''
+            result = translator.translate_spans(spans, TranslationDirection.EN_TO_JA)
+
+            assert len(result) == 2
+            assert result[0].translated_text == "こんにちは世界"
+            assert result[1].translated_text == "テスト"
+
+    def test_translate_spans_groups_have_spans(self, mock_api_key):
+        """正常系: グループにspanが紐づいている"""
+        from modules.translator import Translator, TranslationDirection
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        translator = Translator(api_key=mock_api_key)
+        spans = [
+            SpanInfo(text="Hello", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+            SpanInfo(text="World", bbox=BoundingBox(55, 0, 100, 20), font=FontInfo(name="Arial", size=12.0), index=1),
+        ]
+
+        with patch.object(translator, "_call_api_with_system") as mock_call:
+            mock_call.return_value = '[{"start": 0, "end": 1, "translation": "こんにちは世界"}]'
+            result = translator.translate_spans(spans, TranslationDirection.EN_TO_JA)
+
+            assert len(result[0].spans) == 2
+            assert result[0].spans[0].text == "Hello"
+            assert result[0].spans[1].text == "World"
+
+    def test_parse_translation_groups_valid_json(self, mock_api_key):
+        """正常系: 有効なJSONのパース"""
+        from modules.translator import Translator, TranslationDirection
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        translator = Translator(api_key=mock_api_key)
+        spans = [
+            SpanInfo(text="Test", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+        ]
+
+        response = '[{"start": 0, "end": 0, "translation": "テスト"}]'
+        result = translator._parse_translation_groups(response, spans)
+
+        assert len(result) == 1
+        assert result[0].translated_text == "テスト"
+
+    def test_parse_translation_groups_with_extra_text(self, mock_api_key):
+        """正常系: 余分なテキストを含むレスポンスのパース"""
+        from modules.translator import Translator, TranslationDirection
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        translator = Translator(api_key=mock_api_key)
+        spans = [
+            SpanInfo(text="Test", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+        ]
+
+        # JSONの前後に余分なテキストがある場合
+        response = 'Here is the translation:\n[{"start": 0, "end": 0, "translation": "テスト"}]\nDone!'
+        result = translator._parse_translation_groups(response, spans)
+
+        assert len(result) == 1
+        assert result[0].translated_text == "テスト"
+
+    def test_parse_translation_groups_invalid_json_fallback(self, mock_api_key):
+        """異常系: 無効なJSONでフォールバック"""
+        from modules.translator import Translator, TranslationDirection
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        translator = Translator(api_key=mock_api_key)
+        spans = [
+            SpanInfo(text="Test", bbox=BoundingBox(0, 0, 50, 20), font=FontInfo(name="Arial", size=12.0), index=0),
+        ]
+
+        response = 'This is not valid JSON'
+        result = translator._parse_translation_groups(response, spans)
+
+        # フォールバック: 各spanが個別グループになる
+        assert len(result) == 1
+        assert result[0].translated_text == "Test"  # 翻訳なし、元テキスト
+
+    def test_fallback_groups(self, mock_api_key):
+        """正常系: フォールバックグループ生成"""
+        from modules.translator import Translator
+        from modules.layout_manager import SpanInfo, BoundingBox, FontInfo
+
+        translator = Translator(api_key="dummy")
+        spans = [
+            SpanInfo(text="A", bbox=BoundingBox(0, 0, 10, 10), font=FontInfo(name="Arial", size=12.0), index=0),
+            SpanInfo(text="B", bbox=BoundingBox(10, 0, 20, 10), font=FontInfo(name="Arial", size=12.0), index=1),
+        ]
+
+        result = translator._fallback_groups(spans)
+
+        assert len(result) == 2
+        assert result[0].start_index == 0
+        assert result[0].end_index == 0
+        assert result[0].original_text == "A"
+        assert result[0].translated_text == "A"  # 翻訳なし
+        assert result[1].start_index == 1
+        assert result[1].original_text == "B"
