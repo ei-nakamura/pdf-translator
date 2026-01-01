@@ -819,3 +819,264 @@ class TestReplaceWithGroups:
 
         # ファイルが正常に作成されていればOK
         assert output_path.exists()
+
+
+class TestJapaneseCharDetection:
+    """_is_japanese_charメソッドのテスト（設計書11.4節）"""
+
+    def test_is_japanese_char_hiragana(self):
+        """正常系: ひらがな判定"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese_char("あ") is True
+        assert writer._is_japanese_char("ん") is True
+        assert writer._is_japanese_char("っ") is True
+
+    def test_is_japanese_char_katakana(self):
+        """正常系: カタカナ判定"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese_char("ア") is True
+        assert writer._is_japanese_char("ン") is True
+        assert writer._is_japanese_char("ッ") is True
+
+    def test_is_japanese_char_kanji(self):
+        """正常系: 漢字判定"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese_char("漢") is True
+        assert writer._is_japanese_char("字") is True
+        assert writer._is_japanese_char("日") is True
+
+    def test_is_japanese_char_fullwidth_symbols(self):
+        """正常系: 全角記号・句読点判定"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese_char("　") is True  # 全角スペース
+        assert writer._is_japanese_char("、") is True  # 読点
+        assert writer._is_japanese_char("。") is True  # 句点
+
+    def test_is_japanese_char_fullwidth_alphanumeric(self):
+        """正常系: 全角英数字判定"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese_char("Ａ") is True  # 全角A
+        assert writer._is_japanese_char("１") is True  # 全角1
+        assert writer._is_japanese_char("！") is True  # 全角!
+
+    def test_is_japanese_char_halfwidth_returns_false(self):
+        """正常系: 半角英数字はFalse"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese_char("A") is False
+        assert writer._is_japanese_char("z") is False
+        assert writer._is_japanese_char("1") is False
+        assert writer._is_japanese_char(" ") is False  # 半角スペース
+        assert writer._is_japanese_char("!") is False
+
+
+class TestJapaneseFontSizeCalculation:
+    """日本語対応フォントサイズ計算のテスト（設計書11.4節）"""
+
+    def test_calculate_font_size_japanese_text_correct_width(self):
+        """正常系: 日本語テキストの幅が正しく推定される"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 日本語5文字 × 12pt × 1.0 = 60pt の推定幅
+        # bbox幅が100ptなら収まるはず
+        size = writer._calculate_font_size(
+            text="こんにちは",
+            bbox=(0, 0, 100, 20),
+            original_size=12.0
+        )
+        assert size == 12.0
+
+        # bbox幅が50ptなら縮小が必要
+        size_shrunk = writer._calculate_font_size(
+            text="こんにちは",
+            bbox=(0, 0, 50, 20),
+            original_size=12.0
+        )
+        assert size_shrunk < 12.0
+
+    def test_calculate_font_size_english_text_correct_width(self):
+        """正常系: 英語テキストの幅が正しく推定される"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 英語5文字 × 12pt × 0.55 = 33pt の推定幅
+        # bbox幅が50ptなら収まるはず
+        size = writer._calculate_font_size(
+            text="Hello",
+            bbox=(0, 0, 50, 20),
+            original_size=12.0
+        )
+        assert size == 12.0
+
+        # bbox幅が20ptなら縮小が必要
+        size_shrunk = writer._calculate_font_size(
+            text="Hello",
+            bbox=(0, 0, 20, 20),
+            original_size=12.0
+        )
+        assert size_shrunk < 12.0
+
+    def test_calculate_font_size_mixed_text_correct_width(self):
+        """正常系: 日英混在テキストの幅が正しく推定される"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # "Hello世界" = 英語5文字 + 日本語2文字
+        # 推定幅 = 5 × 12 × 0.55 + 2 × 12 × 1.0 = 33 + 24 = 57pt
+        # bbox幅が100ptなら収まるはず
+        size = writer._calculate_font_size(
+            text="Hello世界",
+            bbox=(0, 0, 100, 20),
+            original_size=12.0
+        )
+        assert size == 12.0
+
+        # bbox幅が40ptなら縮小が必要
+        size_shrunk = writer._calculate_font_size(
+            text="Hello世界",
+            bbox=(0, 0, 40, 20),
+            original_size=12.0
+        )
+        assert size_shrunk < 12.0
+
+    def test_calculate_font_size_japanese_not_over_shrink(self):
+        """正常系: 日本語テキストが過剰に縮小されない"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 従来の実装では、日本語も英語と同じ係数(0.5)で計算していたため
+        # 実際より小さく見積もられ、フォントサイズが不必要に縮小されていた
+        # 新実装では、日本語の正しい係数(1.0)を使用するため、
+        # 適切なサイズが維持される
+
+        # 日本語3文字 "タスク" = 3 × 12 × 1.0 = 36pt
+        # bbox幅50ptなら収まるはず（縮小不要）
+        size = writer._calculate_font_size(
+            text="タスク",
+            bbox=(0, 0, 50, 20),
+            original_size=12.0
+        )
+        assert size == 12.0
+
+
+class TestExtendBboxToGroupRange:
+    """bbox拡張機能のテスト"""
+
+    def test_single_span_returns_same_bbox(self):
+        """正常系: 単一spanの場合はそのspanのbboxを返す"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TranslationGroup, SpanInfo, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+
+        span = SpanInfo(
+            index=0,
+            text="Hello",
+            bbox=BoundingBox(x0=10.0, y0=20.0, x1=100.0, y1=40.0),
+            font=FontInfo(name="Arial", size=12.0, color=(0, 0, 0)),
+        )
+        group = TranslationGroup(
+            start_index=0,
+            end_index=0,
+            original_text="Hello",
+            translated_text="こんにちは",
+            spans=[span],
+        )
+
+        bbox = writer._extend_bbox_to_group_range(group)
+
+        assert bbox == (10.0, 20.0, 100.0, 40.0)
+
+    def test_multiple_spans_combines_first_and_last(self):
+        """正常系: 複数spanの場合は開始spanの左上と終了spanの右下を組み合わせる"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TranslationGroup, SpanInfo, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+
+        span1 = SpanInfo(
+            index=0,
+            text="Hello",
+            bbox=BoundingBox(x0=10.0, y0=20.0, x1=60.0, y1=40.0),
+            font=FontInfo(name="Arial", size=12.0, color=(0, 0, 0)),
+        )
+        span2 = SpanInfo(
+            index=1,
+            text=" ",
+            bbox=BoundingBox(x0=60.0, y0=20.0, x1=70.0, y1=40.0),
+            font=FontInfo(name="Arial", size=12.0, color=(0, 0, 0)),
+        )
+        span3 = SpanInfo(
+            index=2,
+            text="World",
+            bbox=BoundingBox(x0=70.0, y0=20.0, x1=130.0, y1=40.0),
+            font=FontInfo(name="Arial", size=12.0, color=(0, 0, 0)),
+        )
+        group = TranslationGroup(
+            start_index=0,
+            end_index=2,
+            original_text="Hello World",
+            translated_text="こんにちは世界",
+            spans=[span1, span2, span3],
+        )
+
+        bbox = writer._extend_bbox_to_group_range(group)
+
+        # 最初のspanの左上 (10, 20) と最後のspanの右下 (130, 40)
+        assert bbox == (10.0, 20.0, 130.0, 40.0)
+
+    def test_multiline_spans_extends_vertically(self):
+        """正常系: 複数行にまたがるspanでも開始の左上と終了の右下を使用"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TranslationGroup, SpanInfo, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+
+        # 1行目のspan
+        span1 = SpanInfo(
+            index=0,
+            text="First line",
+            bbox=BoundingBox(x0=10.0, y0=20.0, x1=100.0, y1=40.0),
+            font=FontInfo(name="Arial", size=12.0, color=(0, 0, 0)),
+        )
+        # 2行目のspan（Y座標が異なる）
+        span2 = SpanInfo(
+            index=1,
+            text="Second line",
+            bbox=BoundingBox(x0=10.0, y0=45.0, x1=120.0, y1=65.0),
+            font=FontInfo(name="Arial", size=12.0, color=(0, 0, 0)),
+        )
+        group = TranslationGroup(
+            start_index=0,
+            end_index=1,
+            original_text="First line Second line",
+            translated_text="最初の行 2番目の行",
+            spans=[span1, span2],
+        )
+
+        bbox = writer._extend_bbox_to_group_range(group)
+
+        # 最初のspanの左上 (10, 20) と最後のspanの右下 (120, 65)
+        assert bbox == (10.0, 20.0, 120.0, 65.0)

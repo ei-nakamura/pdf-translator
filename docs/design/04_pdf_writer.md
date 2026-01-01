@@ -153,6 +153,9 @@ class PDFWriter:
         """
         テキスト長に応じてフォントサイズを調整
 
+        日本語と英語で文字幅が異なるため、文字種別に応じて
+        推定幅を計算し、適切なフォントサイズを決定する。
+
         Args:
             text: 出力テキスト
             bbox: 配置領域
@@ -160,6 +163,25 @@ class PDFWriter:
 
         Returns:
             float: 調整後のフォントサイズ
+        """
+        pass
+
+    def _is_japanese_char(self, char: str) -> bool:
+        """
+        単一文字が日本語（全角）かどうかを判定
+
+        対象範囲:
+        - ひらがな (U+3040-U+309F)
+        - カタカナ (U+30A0-U+30FF)
+        - 漢字 (U+4E00-U+9FFF)
+        - 全角記号・句読点 (U+3000-U+303F)
+        - 全角英数字 (U+FF00-U+FFEF)
+
+        Args:
+            char: 判定対象の単一文字
+
+        Returns:
+            bool: 日本語（全角）の場合True
         """
         pass
 
@@ -254,13 +276,28 @@ class PDFWriter:
         """
         翻訳グループを書き込む
 
-        グループ内の最初のspan（start_index）の位置にのみ翻訳テキストを配置。
+        グループ内の最初のspanから最後のspanまでの拡張bboxに翻訳テキストを配置。
         他のspanは既にredactで消去済みなので、テキストを書き込まない。
 
         Args:
             page: ページオブジェクト
             group: 翻訳グループ
             target_language: 出力言語
+        """
+        pass
+
+    def _extend_bbox_to_group_range(self, group: TranslationGroup) -> Tuple[float, float, float, float]:
+        """
+        グループの開始spanから終了spanまでの拡張bboxを計算
+
+        開始spanの左上座標と終了spanの右下座標を組み合わせて、
+        グループ全体をカバーするbboxを生成する。
+
+        Args:
+            group: 翻訳グループ
+
+        Returns:
+            拡張されたbbox (x0, y0, x1, y1)
         """
         pass
 ```
@@ -303,6 +340,72 @@ def _add_redact_annotation(self, page: fitz.Page, bbox: Tuple[float, float, floa
 **注意**: `fill=False` を使用することで、背景色（緑など）を保持しながらテキストのみを削除できる。
 
 ### 7.3 フォントサイズ自動調整
+
+#### 7.3.1 文字幅の推定（日本語対応）
+
+日本語と英語で文字幅が大きく異なるため、文字種別に応じて推定幅を計算する：
+
+```python
+def _calculate_font_size(self, text: str, bbox: Tuple[float, float, float, float],
+                          original_size: float) -> float:
+    """
+    テキストがbbox幅に収まるようにフォントサイズを計算
+
+    文字種別ごとの幅係数:
+    - 日本語（全角）: original_size × 1.0
+    - 英語（半角）: original_size × 0.55
+    """
+    width = bbox[2] - bbox[0]
+
+    if not text:
+        return original_size
+
+    # 日本語と英語の文字数をカウント
+    japanese_count = sum(1 for c in text if self._is_japanese_char(c))
+    english_count = len(text) - japanese_count
+
+    # 加重平均で推定文字幅を計算
+    japanese_width = japanese_count * original_size * 1.0
+    english_width = english_count * original_size * 0.55
+    estimated_text_width = japanese_width + english_width
+
+    if estimated_text_width <= width:
+        return original_size
+
+    scale = width / estimated_text_width
+    new_size = original_size * scale
+
+    return max(MIN_FONT_SIZE, min(new_size, MAX_FONT_SIZE))
+```
+
+#### 7.3.2 日本語文字の判定
+
+```python
+def _is_japanese_char(self, char: str) -> bool:
+    """
+    単一文字が日本語（全角）かどうかを判定
+
+    対象範囲:
+    - ひらがな: U+3040-U+309F
+    - カタカナ: U+30A0-U+30FF
+    - 漢字: U+4E00-U+9FFF
+    - 全角記号・句読点: U+3000-U+303F
+    - 全角英数字: U+FF00-U+FFEF
+    """
+    if "\u3040" <= char <= "\u309F":  # ひらがな
+        return True
+    if "\u30A0" <= char <= "\u30FF":  # カタカナ
+        return True
+    if "\u4E00" <= char <= "\u9FFF":  # 漢字
+        return True
+    if "\u3000" <= char <= "\u303F":  # 全角記号・句読点
+        return True
+    if "\uFF00" <= char <= "\uFFEF":  # 全角英数字
+        return True
+    return False
+```
+
+#### 7.3.3 bbox内へのテキストフィッティング
 
 ```python
 def _fit_text_to_bbox(self, text: str, font: fitz.Font, bbox: Tuple[float, float, float, float],
@@ -356,13 +459,39 @@ def _fit_text_to_bbox(self, text: str, font: fitz.Font, bbox: Tuple[float, float
 
 3. 各グループの翻訳テキストを配置
    ├── グループごとにループ
-   │   ├── 最初のspan（start_index）のbboxを取得
-   │   ├── 翻訳テキストをその位置に配置
+   │   ├── _extend_bbox_to_group_range で拡張bboxを計算
+   │   │   ├── 開始span: spans[0] の左上座標 (x0, y0)
+   │   │   └── 終了span: spans[-1] の右下座標 (x1, y1)
+   │   ├── 拡張bboxの領域に翻訳テキストを配置
    │   └── 他のspanは既に消去済み（テキスト配置しない）
    └── 次のグループへ
 ```
 
-**重要**: 翻訳テキストは最初のspanの位置にのみ配置する。これにより、グループ化されたテキストが正しい位置に表示される。
+### 7.5 bbox拡張の計算方法
+
+```python
+def _extend_bbox_to_group_range(self, group: TranslationGroup) -> Tuple[float, float, float, float]:
+    """
+    グループ内の開始spanから終了spanまでの拡張bboxを計算
+
+    計算方法:
+    - x0, y0: 最初のspan（spans[0]）の左上座標
+    - x1, y1: 最後のspan（spans[-1]）の右下座標
+
+    これにより、グループ全体をカバーする矩形領域が得られる。
+    """
+    first_span = group.spans[0]
+    last_span = group.spans[-1]
+
+    return (
+        first_span.bbox.x0,  # 左上X（最初のspanから）
+        first_span.bbox.y0,  # 左上Y（最初のspanから）
+        last_span.bbox.x1,   # 右下X（最後のspanから）
+        last_span.bbox.y1    # 右下Y（最後のspanから）
+    )
+```
+
+**注意**: この方式は、spanが連続的に配置されている場合に最適。非連続なspanや複数行にまたがる場合は、意図しない領域をカバーする可能性がある。
 
 ## 8. エラーハンドリング
 
@@ -465,20 +594,45 @@ writer.close()
 - [x] 正常系：翻訳テキスト配置
 - [x] 正常系：元PDFのレイアウト保持確認
 - [x] 正常系：ベクターグラフィック保持確認
-- [ ] 異常系：元PDF読み込み失敗
+- [x] 異常系：元PDF読み込み失敗
 
 ### 11.3 TranslationGroupベーステスト
 
-- [ ] 正常系：replace_with_groupsによるテキスト置換
-- [ ] 正常系：最初のspan位置への翻訳テキスト配置
-- [ ] 正常系：複数グループの処理
+- [x] 正常系：replace_with_groupsによるテキスト置換
+- [x] 正常系：最初のspan位置への翻訳テキスト配置
+- [x] 正常系：複数グループの処理
+- [x] 正常系：空のグループリスト処理
+- [x] 異常系：ドキュメントが開かれていない
+- [x] 正常系：spansが空のグループはスキップ
+- [x] 正常系：翻訳テキストが空のグループはスキップ
+- [x] 正常系：フォントカラー保持
+
+### 11.4 日本語対応フォントサイズ調整テスト
+
+- [x] 正常系：_is_japanese_char でひらがな判定
+- [x] 正常系：_is_japanese_char でカタカナ判定
+- [x] 正常系：_is_japanese_char で漢字判定
+- [x] 正常系：_is_japanese_char で全角記号判定
+- [x] 正常系：_is_japanese_char で全角英数字判定
+- [x] 正常系：_is_japanese_char で半角英数字はFalse
+- [x] 正常系：_calculate_font_size で日本語テキストの幅が正しく推定される
+- [x] 正常系：_calculate_font_size で英語テキストの幅が正しく推定される
+- [x] 正常系：_calculate_font_size で日英混在テキストの幅が正しく推定される
+
+### 11.5 bbox拡張テスト
+
+- [x] 正常系：_extend_bbox_to_group_range で単一spanの場合はそのspanのbboxを返す
+- [x] 正常系：_extend_bbox_to_group_range で複数spanの場合は開始spanの左上と終了spanの右下を組み合わせる
+- [x] 正常系：_extend_bbox_to_group_range で複数行にまたがるspanでも正しく拡張
 
 ---
 
 **作成日**: 2026-01-01
-**バージョン**: 3.0
+**バージョン**: 3.2
 **更新履歴**:
 
 - v1.0: 初版作成（新規PDF作成方式）
 - v2.0: 元PDF複製＋テキスト置換方式に変更
 - v3.0: TranslationGroupベースの置換機能を追加
+- v3.1: フォントサイズ計算の日本語対応（_is_japanese_char追加、文字幅係数の導入）
+- v3.2: TranslationGroupのbbox拡張機能を追加（_extend_bbox_to_group_range）

@@ -186,6 +186,32 @@ class PDFWriter:
         for group in groups:
             self._write_translation_group(page, group, target_language)
 
+    def _extend_bbox_to_group_range(
+        self,
+        group: TranslationGroup
+    ) -> Tuple[float, float, float, float]:
+        """
+        グループの開始spanから終了spanまでの拡張bboxを計算
+
+        開始spanの左上座標と終了spanの右下座標を組み合わせて、
+        グループ全体をカバーするbboxを生成する。
+
+        Args:
+            group: 翻訳グループ
+
+        Returns:
+            拡張されたbbox (x0, y0, x1, y1)
+        """
+        first_span = group.spans[0]
+        last_span = group.spans[-1]
+
+        return (
+            first_span.bbox.x0,  # 左上X（最初のspanから）
+            first_span.bbox.y0,  # 左上Y（最初のspanから）
+            last_span.bbox.x1,   # 右下X（最後のspanから）
+            last_span.bbox.y1    # 右下Y（最後のspanから）
+        )
+
     def _write_translation_group(
         self,
         page: fitz.Page,
@@ -195,7 +221,7 @@ class PDFWriter:
         """
         翻訳グループを書き込む
 
-        グループ内の最初のspan（start_index）の位置にのみ翻訳テキストを配置。
+        グループ内の開始spanから終了spanまでの拡張bboxに翻訳テキストを配置。
         他のspanは既にredactで消去済みなので、テキストを書き込まない。
 
         Args:
@@ -206,12 +232,12 @@ class PDFWriter:
         if not group.spans or not group.translated_text:
             return
 
-        # 最初のspanの位置にのみ翻訳テキストを配置
-        first_span = group.spans[0]
-        bbox = first_span.bbox.to_tuple()
+        # 開始spanから終了spanまでの拡張bboxを計算
+        bbox = self._extend_bbox_to_group_range(group)
         text = group.translated_text
 
         # 最初のspanのフォント情報を使用
+        first_span = group.spans[0]
         font = first_span.font
         font_size = self._calculate_font_size(text, bbox, font.size)
         is_japanese = self._is_japanese(text)
@@ -581,14 +607,38 @@ class PDFWriter:
             raise LayoutError(f"Failed to write image: {e}")
 
     def _calculate_font_size(self, text: str, bbox: Tuple[float, float, float, float], original_size: float) -> float:
+        """
+        テキストがbbox幅に収まるようにフォントサイズを計算
+
+        Args:
+            text: 出力テキスト
+            bbox: 配置領域 (x0, y0, x1, y1)
+            original_size: 元のフォントサイズ
+
+        Returns:
+            調整後のフォントサイズ
+        """
         width = bbox[2] - bbox[0]
         height = bbox[3] - bbox[1]
 
         if not text:
             return original_size
 
-        avg_char_width = original_size * 0.5
-        estimated_text_width = len(text) * avg_char_width
+        # 日本語と英語で文字幅の係数を変える
+        # 英語: 約0.5〜0.6、日本語: 約1.0（全角文字）
+        japanese_count = 0
+        english_count = 0
+        for char in text:
+            if self._is_japanese_char(char):
+                japanese_count += 1
+            else:
+                english_count += 1
+
+        # 加重平均で推定文字幅を計算
+        # 日本語は全角なので係数1.0、英語は半角なので係数0.55
+        japanese_width = japanese_count * original_size * 1.0
+        english_width = english_count * original_size * 0.55
+        estimated_text_width = japanese_width + english_width
 
         if estimated_text_width <= width:
             return original_size
@@ -597,6 +647,25 @@ class PDFWriter:
         new_size = original_size * scale
 
         return max(MIN_FONT_SIZE, min(new_size, MAX_FONT_SIZE))
+
+    def _is_japanese_char(self, char: str) -> bool:
+        """単一文字が日本語（全角）かどうかを判定"""
+        # ひらがな
+        if "\u3040" <= char <= "\u309F":
+            return True
+        # カタカナ
+        if "\u30A0" <= char <= "\u30FF":
+            return True
+        # 漢字
+        if "\u4E00" <= char <= "\u9FFF":
+            return True
+        # 全角記号・句読点
+        if "\u3000" <= char <= "\u303F":
+            return True
+        # 全角英数字
+        if "\uFF00" <= char <= "\uFFEF":
+            return True
+        return False
 
     def _get_font(self, lang: str, is_bold: bool = False) -> str:
         if lang == "ja":
