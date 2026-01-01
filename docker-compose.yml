@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  pdf-translator:
+    build: .
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+    # コマンドはdocker-compose run時に指定
+    # 例: docker-compose run --rm pdf-translator /app/input/document.pdf --direction ja-to-en

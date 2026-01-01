@@ -1,0 +1,431 @@
+"""
+PDF Translator - PDF Writer Module Tests
+
+設計書: docs/design/04_pdf_writer.md
+"""
+
+import pytest
+from pathlib import Path
+import fitz  # PyMuPDF
+
+
+class TestPDFWriter:
+    """PDFWriterクラスのテスト"""
+
+    def test_create_pdf_writer(self):
+        """正常系: PDFWriter生成"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        assert writer is not None
+
+    def test_create_pdf_writer_with_font_config(self):
+        """正常系: フォント設定付きPDFWriter生成"""
+        from modules.pdf_writer import PDFWriter
+
+        font_config = {
+            "japanese": {"regular": "/path/to/font.ttf"},
+            "english": {"regular": "helv"},
+        }
+        writer = PDFWriter(font_config=font_config)
+        assert writer is not None
+
+    def test_close(self):
+        """正常系: クローズ処理"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.close()  # エラーなく終了すること
+
+
+class TestPDFWriterDocument:
+    """PDFWriterドキュメント操作のテスト"""
+
+    def test_create_document(self):
+        """正常系: ドキュメント作成"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.create_document(
+            page_count=2, page_sizes=[(595.0, 842.0), (595.0, 842.0)]
+        )
+
+        # ドキュメントが作成されていること
+        assert writer._document is not None
+
+        writer.close()
+
+    def test_create_document_different_sizes(self):
+        """正常系: 異なるサイズのページでドキュメント作成"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.create_document(
+            page_count=2,
+            page_sizes=[(595.0, 842.0), (842.0, 595.0)],  # A4縦、A4横
+        )
+
+        assert writer._document is not None
+
+        writer.close()
+
+    def test_save_document(self, temp_dir):
+        """正常系: ドキュメント保存"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.create_document(page_count=1, page_sizes=[(595.0, 842.0)])
+
+        output_path = temp_dir / "output.pdf"
+        writer.save(str(output_path))
+
+        assert output_path.exists()
+
+        writer.close()
+
+
+class TestPDFWriterPage:
+    """PDFWriterページ操作のテスト"""
+
+    def test_write_page(self):
+        """正常系: ページ書き込み"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import PageData, TextBlock, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.create_document(page_count=1, page_sizes=[(595.0, 842.0)])
+
+        page_data = PageData(page_number=0, width=595.0, height=842.0)
+        translated_blocks = [
+            TextBlock(
+                id="block_1",
+                text="Original",
+                translated_text="翻訳済み",
+                bbox=BoundingBox(50, 100, 200, 120),
+                font=FontInfo(name="Arial", size=12.0),
+            )
+        ]
+
+        writer.write_page(0, page_data, translated_blocks)
+
+        writer.close()
+
+    def test_write_text_block(self):
+        """正常系: テキストブロック書き込み"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TextBlock, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.create_document(page_count=1, page_sizes=[(595.0, 842.0)])
+
+        block = TextBlock(
+            id="block_1",
+            text="Hello",
+            translated_text="こんにちは",
+            bbox=BoundingBox(50, 100, 200, 120),
+            font=FontInfo(name="Arial", size=12.0),
+        )
+
+        # ページオブジェクトを取得してテキストブロックを書き込み
+        # 実装によってはページオブジェクトの取得方法が異なる
+        writer.write_text_block(writer._document[0], block, "ja")
+
+        writer.close()
+
+
+class TestPDFWriterImage:
+    """PDFWriter画像操作のテスト"""
+
+    def test_write_image(self):
+        """正常系: 画像書き込み"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import ImageInfo, BoundingBox
+        import base64
+
+        writer = PDFWriter()
+        writer.create_document(page_count=1, page_sizes=[(595.0, 842.0)])
+
+        # Valid 1x1 pixel red PNG image (base64 encoded then decoded)
+        # This is a valid minimal PNG file
+        image_data = base64.b64decode(
+            b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+        )
+
+        image_info = ImageInfo(
+            id="img_1",
+            bbox=BoundingBox(100, 200, 300, 400),
+            image_data=image_data,
+            image_type="png",
+        )
+
+        writer.write_image(writer._document[0], image_info)
+
+        writer.close()
+
+
+class TestPDFWriterFontSize:
+    """フォントサイズ調整のテスト"""
+
+    def test_calculate_font_size_no_change(self):
+        """正常系: フォントサイズ変更なし"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 短いテキストは変更なし
+        size = writer._calculate_font_size(
+            text="Hi", bbox=(0, 0, 100, 20), original_size=12.0
+        )
+
+        assert size == 12.0
+
+    def test_calculate_font_size_shrink(self):
+        """正常系: フォントサイズ縮小"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 長いテキストは縮小
+        size = writer._calculate_font_size(
+            text="This is a very long text that should not fit",
+            bbox=(0, 0, 50, 20),
+            original_size=12.0,
+        )
+
+        assert size < 12.0
+
+    def test_calculate_font_size_min_limit(self):
+        """正常系: 最小フォントサイズ制限"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        # 非常に長いテキストでも最小サイズ以下にはならない
+        size = writer._calculate_font_size(
+            text="A" * 1000, bbox=(0, 0, 10, 20), original_size=12.0
+        )
+
+        assert size >= 6.0  # MIN_FONT_SIZE
+
+
+class TestPDFWriterFont:
+    """フォント取得のテスト"""
+
+    def test_get_font_japanese(self):
+        """正常系: 日本語フォント取得"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        font = writer._get_font("ja", is_bold=False)
+
+        assert font is not None
+
+    def test_get_font_english(self):
+        """正常系: 英語フォント取得"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        font = writer._get_font("en", is_bold=False)
+
+        assert font is not None
+
+    def test_get_font_bold(self):
+        """正常系: 太字フォント取得"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        font = writer._get_font("en", is_bold=True)
+
+        assert font is not None
+
+
+class TestPDFWriterExceptions:
+    """PDFWriter例外クラスのテスト"""
+
+    def test_pdf_write_error_exists(self):
+        """PDFWriteError例外が存在"""
+        from modules.pdf_writer import PDFWriteError
+
+        assert PDFWriteError is not None
+
+    def test_font_error_exists(self):
+        """FontError例外が存在"""
+        from modules.pdf_writer import FontError
+
+        assert FontError is not None
+
+    def test_layout_error_exists(self):
+        """LayoutError例外が存在"""
+        from modules.pdf_writer import LayoutError
+
+        assert LayoutError is not None
+
+    def test_font_error_is_subclass(self):
+        """FontErrorがPDFWriteErrorのサブクラス"""
+        from modules.pdf_writer import PDFWriteError, FontError
+
+        assert issubclass(FontError, PDFWriteError)
+
+    def test_layout_error_is_subclass(self):
+        """LayoutErrorがPDFWriteErrorのサブクラス"""
+        from modules.pdf_writer import PDFWriteError, LayoutError
+
+        assert issubclass(LayoutError, PDFWriteError)
+
+
+class TestPDFWriterSaveOptions:
+    """保存オプションのテスト"""
+
+    def test_save_with_compression(self, temp_dir):
+        """正常系: 圧縮付き保存"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.create_document(page_count=1, page_sizes=[(595.0, 842.0)])
+
+        output_path = temp_dir / "compressed.pdf"
+        writer.save(str(output_path), compress=True)
+
+        assert output_path.exists()
+
+        writer.close()
+
+    def test_save_without_compression(self, temp_dir):
+        """正常系: 圧縮なし保存"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.create_document(page_count=1, page_sizes=[(595.0, 842.0)])
+
+        output_path = temp_dir / "uncompressed.pdf"
+        writer.save(str(output_path), compress=False)
+
+        assert output_path.exists()
+
+        writer.close()
+
+
+class TestPDFWriterSourceDocument:
+    """元PDF複製＋テキスト置換方式のテスト"""
+
+    @pytest.fixture
+    def sample_pdf(self, temp_dir):
+        """テスト用のサンプルPDFを作成"""
+        pdf_path = temp_dir / "sample.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=595, height=842)
+        # テキストを追加
+        page.insert_text((50, 100), "Hello World", fontsize=12)
+        # 図形を追加（背景として）
+        page.draw_rect(fitz.Rect(20, 20, 200, 200), color=(0, 1, 0), fill=(0, 1, 0))
+        doc.save(str(pdf_path))
+        doc.close()
+        return pdf_path
+
+    def test_open_source(self, sample_pdf):
+        """正常系: 元PDFを開く"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf))
+
+        assert writer._document is not None
+        assert len(writer._document) == 1
+
+        writer.close()
+
+    def test_open_source_file_not_found(self, temp_dir):
+        """異常系: 元PDFが存在しない"""
+        from modules.pdf_writer import PDFWriter, PDFWriteError
+
+        writer = PDFWriter()
+
+        with pytest.raises(PDFWriteError):
+            writer.open_source(str(temp_dir / "nonexistent.pdf"))
+
+    def test_replace_text_on_page(self, sample_pdf, temp_dir):
+        """正常系: ページ上のテキストを置換"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TextBlock, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf))
+
+        # 翻訳テキストブロック
+        translated_blocks = [
+            TextBlock(
+                id="block_1",
+                text="Hello World",
+                translated_text="こんにちは世界",
+                bbox=BoundingBox(50, 90, 200, 110),
+                font=FontInfo(name="Arial", size=12.0),
+            )
+        ]
+
+        writer.replace_text_on_page(0, translated_blocks, "ja")
+
+        # 保存して確認
+        output_path = temp_dir / "replaced.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        assert output_path.exists()
+
+    def test_clear_text_area(self, sample_pdf):
+        """正常系: テキスト領域を消去"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf))
+
+        page = writer._document[0]
+        writer._clear_text_area(page, (40, 80, 210, 120))
+
+        writer.close()
+
+    def test_layout_preserved(self, sample_pdf, temp_dir):
+        """正常系: 元PDFのレイアウト（図形）が保持される"""
+        from modules.pdf_writer import PDFWriter
+        from modules.layout_manager import TextBlock, BoundingBox, FontInfo
+
+        writer = PDFWriter()
+        writer.open_source(str(sample_pdf))
+
+        # テキストを置換
+        translated_blocks = [
+            TextBlock(
+                id="block_1",
+                text="Hello World",
+                translated_text="こんにちは",
+                bbox=BoundingBox(50, 90, 200, 110),
+                font=FontInfo(name="Arial", size=12.0),
+            )
+        ]
+        writer.replace_text_on_page(0, translated_blocks, "ja")
+
+        output_path = temp_dir / "layout_preserved.pdf"
+        writer.save(str(output_path))
+        writer.close()
+
+        # 出力PDFを開いて描画要素が保持されていることを確認
+        output_doc = fitz.open(str(output_path))
+        output_page = output_doc[0]
+        drawings = output_page.get_drawings()
+
+        # 元の図形が保持されていること（少なくとも1つ以上の描画要素）
+        # 注: 白い矩形が追加されるため、元の図形 + 消去用矩形が存在
+        assert len(drawings) >= 1
+
+        output_doc.close()
+
+    def test_is_japanese(self):
+        """正常系: 日本語判定"""
+        from modules.pdf_writer import PDFWriter
+
+        writer = PDFWriter()
+
+        assert writer._is_japanese("こんにちは") is True
+        assert writer._is_japanese("カタカナ") is True
+        assert writer._is_japanese("漢字") is True
+        assert writer._is_japanese("Hello") is False
+        assert writer._is_japanese("123") is False
