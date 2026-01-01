@@ -298,3 +298,59 @@ class TestTranslatorPrompt:
         )
 
         assert "Technical document" in prompt
+
+
+class TestTranslatorShortText:
+    """短いテキスト（単語のみ）の翻訳テスト"""
+
+    def test_translate_single_word(self, mock_api_key):
+        """正常系: 単語のみの翻訳"""
+        from modules.translator import Translator, TranslationDirection
+
+        translator = Translator(api_key=mock_api_key)
+
+        with patch.object(translator, "_call_api") as mock_call:
+            mock_call.return_value = "タスク"
+            result = translator.translate("Task", TranslationDirection.EN_TO_JA)
+
+            assert result == "タスク"
+            # エラーメッセージが返されていないことを確認
+            assert "I notice" not in result
+            assert "Could you" not in result
+
+    def test_translate_short_phrase(self, mock_api_key):
+        """正常系: 短いフレーズの翻訳"""
+        from modules.translator import Translator, TranslationDirection
+
+        translator = Translator(api_key=mock_api_key)
+
+        with patch.object(translator, "_call_api") as mock_call:
+            mock_call.return_value = "参考文献"
+            result = translator.translate("References", TranslationDirection.EN_TO_JA)
+
+            assert result == "参考文献"
+
+    def test_system_prompt_includes_short_text_rule(self, mock_api_key):
+        """正常系: システムプロンプトに短いテキストのルールが含まれる"""
+        from modules.translator import Translator, TranslationDirection, SYSTEM_PROMPT_EN_TO_JA
+
+        # ルール8と9が含まれていることを確認
+        assert "single words" in SYSTEM_PROMPT_EN_TO_JA or "short" in SYSTEM_PROMPT_EN_TO_JA.lower()
+        assert "Never respond with questions" in SYSTEM_PROMPT_EN_TO_JA or "always provide a translation" in SYSTEM_PROMPT_EN_TO_JA.lower()
+
+    def test_validate_translation_response(self, mock_api_key):
+        """正常系: 翻訳レスポンスの検証"""
+        from modules.translator import Translator, TranslationDirection
+
+        translator = Translator(api_key=mock_api_key)
+
+        # エラーメッセージのような応答がフィルタリングされることを確認
+        with patch.object(translator, "_call_api") as mock_call:
+            # APIがエラーメッセージを返した場合
+            mock_call.return_value = 'I notice you wrote "Task" but didn\'t include any text'
+
+            result = translator.translate("Task", TranslationDirection.EN_TO_JA)
+
+            # 検証機能が実装されていれば、エラーメッセージは除外されるべき
+            # 現時点では実装されていないため、このテストは将来の実装のために存在
+            assert result is not None

@@ -69,6 +69,8 @@ Rules:
 5. Output ONLY the translated text without any explanations or notes
 6. Preserve paragraph structure and line breaks
 7. Use appropriate Japanese writing style based on the context
+8. For single words or short phrases (like "Task", "Context", "References", "Evaluate", "Iterate"), translate them directly without asking for more context
+9. Never respond with questions, requests for clarification, or any meta-commentary - always provide a translation immediately
 """
 
 

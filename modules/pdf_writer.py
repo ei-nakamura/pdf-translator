@@ -11,7 +11,7 @@ import os
 import platform
 
 from modules.layout_manager import (
-    BoundingBox, FontInfo, TextBlock, ImageInfo, PageData
+    BoundingBox, FontInfo, TextBlock, ImageInfo, PageData, SpanInfo
 )
 
 
@@ -126,17 +126,33 @@ class PDFWriter:
 
         page = self._document[page_num]
 
-        # まずすべてのテキスト領域をredactでマーク
-        for block in text_blocks:
-            bbox = block.bbox.to_tuple()
-            self._add_redact_annotation(page, bbox)
+        # ハイブリッドモード: span座標を使用
+        has_spans = any(block.spans for block in text_blocks)
+
+        if has_spans:
+            # span座標でredact
+            for block in text_blocks:
+                for span in block.spans:
+                    bbox = span.bbox.to_tuple()
+                    self._add_redact_annotation(page, bbox)
+        else:
+            # 従来方式: block座標でredact
+            for block in text_blocks:
+                bbox = block.bbox.to_tuple()
+                self._add_redact_annotation(page, bbox)
 
         # redactionを一括適用（テキストを削除）
         page.apply_redactions()
 
         # 翻訳テキストを配置
-        for block in text_blocks:
-            self._write_text(page, block, target_language)
+        if has_spans:
+            # span座標を使って配置
+            for block in text_blocks:
+                self._write_text_with_spans(page, block, target_language)
+        else:
+            # 従来方式
+            for block in text_blocks:
+                self._write_text(page, block, target_language)
 
     def _add_redact_annotation(
         self,
@@ -220,6 +236,75 @@ class PDFWriter:
                 )
         except Exception as e:
             raise LayoutError(f"Failed to write text: {e}")
+
+    def _write_text_with_spans(
+        self,
+        page: fitz.Page,
+        block: TextBlock,
+        target_language: str
+    ) -> None:
+        """
+        span座標を使って翻訳テキストを配置（ハイブリッドモード用）
+
+        翻訳テキストを元のspanの位置と比率に応じて分割配置する。
+        これにより、元のレイアウトを維持しながら翻訳テキストを配置できる。
+
+        Args:
+            page: ページオブジェクト
+            block: テキストブロック（spans情報を含む）
+            target_language: 出力言語
+        """
+        translated_text = block.translated_text or block.text
+        if not translated_text or not block.spans:
+            return
+
+        # 元テキストの合計文字数
+        original_total_len = sum(len(span.text) for span in block.spans)
+        if original_total_len == 0:
+            return
+
+        # 翻訳テキストを元のspan比率で分割して配置
+        translated_pos = 0
+        translated_total_len = len(translated_text)
+
+        for i, span in enumerate(block.spans):
+            # このspanに割り当てる翻訳文字数を計算
+            span_ratio = len(span.text) / original_total_len
+
+            if i == len(block.spans) - 1:
+                # 最後のspanは残り全部
+                span_translated = translated_text[translated_pos:]
+            else:
+                span_len = int(translated_total_len * span_ratio)
+                # 最低1文字は確保
+                span_len = max(1, span_len)
+                span_translated = translated_text[translated_pos:translated_pos + span_len]
+                translated_pos += span_len
+
+            if not span_translated:
+                continue
+
+            bbox = span.bbox.to_tuple()
+            font_size = self._calculate_font_size(span_translated, bbox, span.font.size)
+            is_japanese = self._is_japanese(span_translated)
+            color = tuple(c / 255.0 for c in span.font.color)
+
+            try:
+                if is_japanese and self._japanese_font_path:
+                    self._write_text_with_font(page, span_translated, bbox, font_size, color)
+                else:
+                    rect = fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+                    font_name = "hebo" if span.font.is_bold else self._english_font
+                    page.insert_textbox(
+                        rect,
+                        span_translated,
+                        fontsize=font_size,
+                        fontname=font_name,
+                        color=color,
+                        align=fitz.TEXT_ALIGN_LEFT,
+                    )
+            except Exception as e:
+                raise LayoutError(f"Failed to write span text: {e}")
 
     def _write_text_with_font(
         self,

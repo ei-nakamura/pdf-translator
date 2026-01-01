@@ -24,6 +24,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+debug_*.py
 
 # Virtual environments
 venv/

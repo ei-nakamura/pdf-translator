@@ -65,6 +65,21 @@ class FontInfo:
 
 
 @dataclass
+class SpanInfo:
+    """span単位のテキスト情報（座標精度を保持）"""
+    text: str
+    bbox: BoundingBox
+    font: FontInfo
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"text": self.text, "bbox": self.bbox.to_dict(), "font": self.font.to_dict()}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "SpanInfo":
+        return cls(text=d["text"], bbox=BoundingBox.from_dict(d["bbox"]), font=FontInfo.from_dict(d["font"]))
+
+
+@dataclass
 class TextBlock:
     id: str
     text: str
@@ -74,6 +89,7 @@ class TextBlock:
     block_type: str = "text"
     line_count: int = 1
     paragraph_index: int = 0
+    spans: List["SpanInfo"] = field(default_factory=list)  # ハイブリッドモード用
 
     @property
     def char_count(self) -> int:
@@ -90,11 +106,11 @@ class TextBlock:
         return self.translated_char_count / self.char_count
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"id": self.id, "text": self.text, "translated_text": self.translated_text, "bbox": self.bbox.to_dict(), "font": self.font.to_dict(), "block_type": self.block_type, "line_count": self.line_count, "paragraph_index": self.paragraph_index}
+        return {"id": self.id, "text": self.text, "translated_text": self.translated_text, "bbox": self.bbox.to_dict(), "font": self.font.to_dict(), "block_type": self.block_type, "line_count": self.line_count, "paragraph_index": self.paragraph_index, "spans": [s.to_dict() for s in self.spans]}
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TextBlock":
-        return cls(id=d["id"], text=d["text"], translated_text=d.get("translated_text"), bbox=BoundingBox.from_dict(d["bbox"]), font=FontInfo.from_dict(d["font"]), block_type=d.get("block_type", "text"), line_count=d.get("line_count", 1), paragraph_index=d.get("paragraph_index", 0))
+        return cls(id=d["id"], text=d["text"], translated_text=d.get("translated_text"), bbox=BoundingBox.from_dict(d["bbox"]), font=FontInfo.from_dict(d["font"]), block_type=d.get("block_type", "text"), line_count=d.get("line_count", 1), paragraph_index=d.get("paragraph_index", 0), spans=[SpanInfo.from_dict(s) for s in d.get("spans", [])])
 
 
 @dataclass
